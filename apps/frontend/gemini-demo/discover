@@ -1,0 +1,378 @@
+import React, { useState } from 'react';
+import { 
+  Search, 
+  Bell, 
+  Calendar, 
+  Compass, 
+  Plus, 
+  MapPin, 
+  ChevronRight, 
+  Zap, 
+  Coffee, 
+  Cpu, 
+  Palette, 
+  Leaf, 
+  Activity, 
+  Globe, 
+  Users 
+} from 'lucide-react';
+
+// --- Mock Data ---
+
+const CATEGORIES = [
+  { id: 1, name: 'Tech & AI', count: '12.5K Events', icon: Cpu, color: 'text-blue-500', bg: 'bg-blue-50' },
+  { id: 2, name: 'Food & Drink', count: '8.2K Events', icon: Coffee, color: 'text-orange-500', bg: 'bg-orange-50' },
+  { id: 3, name: 'Arts & Culture', count: '5.4K Events', icon: Palette, color: 'text-purple-500', bg: 'bg-purple-50' },
+  { id: 4, name: 'Wellness', count: '3.2K Events', icon: Leaf, color: 'text-green-500', bg: 'bg-green-50' },
+  { id: 5, name: 'Fitness', count: '4.1K Events', icon: Activity, color: 'text-red-500', bg: 'bg-red-50' },
+  { id: 6, name: 'Crypto', count: '1.8K Events', icon: Zap, color: 'text-yellow-500', bg: 'bg-yellow-50' },
+];
+
+const POPULAR_EVENTS = [
+  {
+    id: 1,
+    title: 'Elevé Matcha Social',
+    date: 'Tomorrow, 6:30 PM',
+    location: '568 S Coppell Rd',
+    image: 'https://images.unsplash.com/photo-1544161515-4ab6ce6db874?ixlib=rb-4.0.3&auto=format&fit=crop&w=200&q=80',
+    organizer: 'Matcha Club'
+  },
+  {
+    id: 2,
+    title: 'Dallas Community Meet-up',
+    date: 'Thu, Dec 11, 4:30 PM',
+    location: 'ServiceNow HQ',
+    image: 'https://images.unsplash.com/photo-1523580494863-6f3031224c94?ixlib=rb-4.0.3&auto=format&fit=crop&w=200&q=80',
+    organizer: 'PSC'
+  },
+  {
+    id: 3,
+    title: 'Sunset Rooftop Yoga',
+    date: 'Sat, Dec 14, 9:00 AM',
+    location: 'Skyline Deck',
+    image: 'https://images.unsplash.com/photo-1599901860904-17e6ed7083a0?ixlib=rb-4.0.3&auto=format&fit=crop&w=200&q=80',
+    organizer: 'Zen Flow'
+  }
+];
+
+const FEATURED_COMMUNITIES = [
+  {
+    id: 1,
+    name: 'Reading Rhythms',
+    description: 'Not a book club. A reading party. Read with friends to live music.',
+    logo: '📚', // Emoji as logo placeholder
+    location: 'Global'
+  },
+  {
+    id: 2,
+    name: 'Build Club',
+    description: 'The best place in the world to learn AI. Curated with love.',
+    logo: '🚀',
+    location: 'Sydney'
+  },
+  {
+    id: 3,
+    name: 'Design Buddies',
+    description: 'Events for designers and all creatives across SF, online, and beyond.',
+    logo: '🎨',
+    location: 'San Francisco'
+  },
+  {
+    id: 4,
+    name: 'The AI Collective',
+    description: 'The world\'s largest AI community: 100,000+ pioneers.',
+    logo: '🤖',
+    location: 'Global'
+  }
+];
+
+const CITIES = {
+  'North America': [
+    { name: 'New York', events: '2.4K Events', icon: '🗽' },
+    { name: 'San Francisco', events: '1.8K Events', icon: '🌉' },
+    { name: 'Austin', events: '950 Events', icon: '🎸' },
+    { name: 'Toronto', events: '840 Events', icon: '🍁' },
+    { name: 'Los Angeles', events: '1.5K Events', icon: '🌴' },
+  ],
+  'Europe': [
+    { name: 'London', events: '1.9K Events', icon: '💂' },
+    { name: 'Berlin', events: '1.2K Events', icon: '🐻' },
+    { name: 'Paris', events: '1.4K Events', icon: '🥐' },
+    { name: 'Amsterdam', events: '890 Events', icon: '🌷' },
+  ],
+  'Asia & Pacific': [
+    { name: 'Tokyo', events: '2.1K Events', icon: '🗼' },
+    { name: 'Singapore', events: '1.1K Events', icon: '🦁' },
+    { name: 'Seoul', events: '980 Events', icon: '🏮' },
+    { name: 'Bangkok', events: '750 Events', icon: '🐘' },
+  ],
+  'South America': [
+    { name: 'São Paulo', events: '1.3K Events', icon: '🌇' }, // 城市天际线
+    { name: 'Buenos Aires', events: '920 Events', icon: '💃' }, // 探戈
+    { name: 'Rio', events: '850 Events', icon: '🏖️' }, // 海滩
+    { name: 'Bogotá', events: '640 Events', icon: '☕' }, // 咖啡
+  ],
+  'Africa': [
+    { name: 'Cape Town', events: '780 Events', icon: '⛰️' }, // 桌山
+    { name: 'Lagos', events: '650 Events', icon: '🎵' }, // 音乐/Afrobeats
+    { name: 'Nairobi', events: '520 Events', icon: '🦒' }, // 动物/自然
+    { name: 'Cairo', events: '940 Events', icon: '🐫' }, // 骆驼/金字塔
+  ]
+};
+
+// --- Components ---
+
+const Navbar = () => (
+  <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-white/50 py-4">
+    <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
+      <div className="flex items-center gap-8">
+        <div className="flex items-center gap-2">
+          {/* Logo - Text Only */}
+          <span className="font-logo text-3xl text-[#FF6B3D] tracking-wide hover:opacity-80 transition-opacity cursor-pointer">HereNow</span>
+        </div>
+        
+        <div className="hidden md:flex items-center gap-6 text-slate-500 font-medium">
+          <a href="#" className="flex items-center gap-2 hover:text-slate-900 transition-colors">
+            <Calendar size={18} className="text-slate-400" />
+            Events
+          </a>
+          <a href="#" className="flex items-center gap-2 hover:text-slate-900 transition-colors">
+            <Users size={18} className="text-slate-400" />
+            Communities
+          </a>
+          <a href="#" className="text-slate-900 flex items-center gap-2">
+            <Compass size={18} className="text-[#FF6B3D]" />
+            Discover
+          </a>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-4">
+        <button className="p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors">
+          <Search size={20} />
+        </button>
+        <button className="p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors">
+          <Bell size={20} />
+        </button>
+        <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-orange-200 to-pink-200 border border-white shadow-sm" />
+        <button className="hidden sm:flex items-center gap-2 bg-[#FF6B3D] hover:bg-[#e55a2d] text-white px-4 py-2 rounded-full font-bold transition-all shadow-lg shadow-orange-500/30 text-sm">
+          <Plus size={16} />
+          Create Event
+        </button>
+      </div>
+    </div>
+  </nav>
+);
+
+const SectionTitle = ({ title, subtitle, action }) => (
+  <div className="flex items-end justify-between mb-6">
+    <div>
+      <h2 className="font-brand text-2xl font-bold text-slate-900 mb-1">{title}</h2>
+      {subtitle && <p className="text-slate-500 text-sm">{subtitle}</p>}
+    </div>
+    {action && (
+      <button className="text-sm font-semibold text-slate-500 hover:text-[#FF6B3D] flex items-center gap-1 transition-colors">
+        {action} <ChevronRight size={16} />
+      </button>
+    )}
+  </div>
+);
+
+const PopularEventCard = ({ event }) => (
+  <div className="group flex gap-4 p-3 bg-white/60 hover:bg-white/90 backdrop-blur-md border border-white/60 rounded-2xl hover:shadow-xl hover:shadow-orange-500/10 transition-all duration-300 cursor-pointer">
+    <img 
+      src={event.image} 
+      alt={event.title} 
+      className="w-24 h-24 rounded-xl object-cover group-hover:scale-105 transition-transform duration-500"
+    />
+    <div className="flex flex-col justify-center py-1">
+      <div className="text-[#FF6B3D] text-xs font-bold uppercase tracking-wider mb-1">
+        {event.date}
+      </div>
+      <h3 className="font-brand font-bold text-slate-900 text-lg leading-tight mb-1 group-hover:text-[#FF6B3D] transition-colors">
+        {event.title}
+      </h3>
+      <div className="flex items-center gap-1 text-slate-500 text-sm">
+        <MapPin size={14} />
+        {event.location}
+      </div>
+    </div>
+  </div>
+);
+
+const CategoryCard = ({ category }) => (
+  <div className="group p-4 bg-white/60 hover:bg-white border border-white/60 rounded-2xl hover:shadow-lg hover:shadow-orange-500/10 transition-all duration-300 cursor-pointer flex items-center gap-4">
+    <div className={`w-12 h-12 rounded-xl ${category.bg} ${category.color} flex items-center justify-center group-hover:scale-110 transition-transform duration-300`}>
+      <category.icon size={24} />
+    </div>
+    <div>
+      <h3 className="font-brand font-bold text-slate-900 group-hover:text-[#FF6B3D] transition-colors">
+        {category.name}
+      </h3>
+      <p className="text-slate-500 text-sm">{category.count}</p>
+    </div>
+  </div>
+);
+
+const CommunityCard = ({ community }) => (
+  <div className="flex flex-col p-5 bg-white/70 hover:bg-white border border-white/60 rounded-3xl hover:shadow-xl hover:shadow-orange-500/10 transition-all duration-300 h-full relative overflow-hidden group/card">
+    <div className="flex justify-between items-start mb-4">
+      <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-2xl shadow-sm group-hover/card:scale-110 transition-transform duration-300">
+        {community.logo}
+      </div>
+      <button className="px-4 py-1.5 rounded-full border border-slate-200 text-slate-600 text-sm font-bold hover:border-[#FF6B3D] hover:bg-[#FF6B3D] hover:text-white transition-all flex items-center gap-1.5 shadow-sm hover:shadow-orange-500/30 group/btn">
+        Join
+        <Plus size={14} className="group-hover/btn:rotate-90 transition-transform duration-300" />
+      </button>
+    </div>
+    <h3 className="font-brand font-bold text-slate-900 text-lg mb-2">
+      {community.name}
+    </h3>
+    <p className="text-slate-500 text-sm leading-relaxed mb-4 line-clamp-2 flex-grow">
+      {community.description}
+    </p>
+    <div className="flex items-center gap-1 text-xs text-slate-400 font-medium uppercase tracking-wide mt-auto">
+      <MapPin size={12} /> {community.location}
+    </div>
+  </div>
+);
+
+const App = () => {
+  const [activeRegion, setActiveRegion] = useState('North America');
+
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans selection:bg-orange-200 selection:text-orange-900">
+      {/* Font Loader */}
+      <style>
+        {`
+          @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=Lalezar&display=swap');
+          .font-brand { font-family: 'Plus Jakarta Sans', sans-serif; }
+          .font-logo { font-family: 'Lalezar', system-ui; }
+          .font-sans { font-family: 'Inter', sans-serif; }
+          
+          /* Subtle patterned background overlay */
+          .bg-pattern {
+            background-image: radial-gradient(#FF6B3D 0.5px, transparent 0.5px);
+            background-size: 24px 24px;
+            opacity: 0.03;
+          }
+        `}
+      </style>
+
+      <div className="fixed inset-0 pointer-events-none bg-gradient-to-br from-slate-50 via-white to-orange-50/40 z-0" />
+      <div className="fixed inset-0 pointer-events-none bg-pattern z-0" />
+
+      <div className="relative z-10">
+        <Navbar />
+
+        <main className="max-w-7xl mx-auto px-6 py-10 pb-24 space-y-16">
+          
+          {/* Header Area */}
+          <header className="max-w-2xl mt-4">
+            <h1 className="font-brand text-5xl md:text-6xl font-extrabold text-slate-900 tracking-tight leading-[1.1]">
+              Your Discover
+            </h1>
+            <p className="font-brand text-5xl md:text-6xl font-extrabold text-[#FF6B3D] tracking-tight mt-2">
+              Awaits
+            </p>
+            <p className="text-slate-500 text-lg md:text-xl leading-relaxed mt-6 max-w-xl">
+              The next unforgettable experience is just around the corner. Step out, explore, and find where you belong.
+            </p>
+          </header>
+
+          {/* Popular Events Section */}
+          <section>
+            <SectionTitle 
+              title="Popular Events" 
+              subtitle="Trending in your area"
+              action="View All" 
+            />
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {POPULAR_EVENTS.map(event => (
+                <PopularEventCard key={event.id} event={event} />
+              ))}
+            </div>
+          </section>
+
+          {/* Categories Section */}
+          <section>
+            <SectionTitle title="Browse by Category" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-3 gap-4">
+              {CATEGORIES.map(category => (
+                <CategoryCard key={category.id} category={category} />
+              ))}
+            </div>
+          </section>
+
+          {/* Featured Communities Section */}
+          <section>
+             <SectionTitle 
+              title="Featured Communities" 
+              subtitle="Curated communities you might like"
+            />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              {FEATURED_COMMUNITIES.map(community => (
+                <CommunityCard key={community.id} community={community} />
+              ))}
+            </div>
+          </section>
+
+          {/* Local Events Section */}
+          <section>
+            <SectionTitle title="Explore Local Events" />
+            
+            {/* Region Tabs */}
+            <div className="flex flex-wrap gap-2 mb-8">
+              {Object.keys(CITIES).map(region => (
+                <button
+                  key={region}
+                  onClick={() => setActiveRegion(region)}
+                  className={`px-5 py-2 rounded-full text-sm font-bold transition-all ${
+                    activeRegion === region
+                      ? 'bg-slate-900 text-white shadow-lg shadow-slate-900/20'
+                      : 'bg-white text-slate-500 hover:bg-slate-100'
+                  }`}
+                >
+                  {region}
+                </button>
+              ))}
+            </div>
+
+            {/* Cities Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
+              {CITIES[activeRegion].map((city, index) => (
+                <div key={index} className="group flex flex-col items-center text-center gap-3 cursor-pointer">
+                  <div className="w-20 h-20 rounded-full bg-white border-2 border-white shadow-sm group-hover:border-[#FF6B3D]/30 group-hover:shadow-orange-500/20 flex items-center justify-center text-3xl transition-all duration-300 group-hover:-translate-y-1">
+                    {city.icon}
+                  </div>
+                  <div>
+                    <h4 className="font-brand font-bold text-slate-900">{city.name}</h4>
+                    <p className="text-xs text-slate-500 font-medium">{city.events}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+        </main>
+
+        {/* Simple Footer */}
+        <footer className="border-t border-slate-200 bg-white/50 backdrop-blur-sm py-12">
+          <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-6">
+             <div className="flex items-center gap-2 opacity-50 grayscale hover:grayscale-0 transition-all">
+                <span className="font-logo text-2xl text-[#FF6B3D]">HereNow</span>
+             </div>
+             <p className="text-slate-400 text-sm">© 2024 HereNow Inc. All rights reserved.</p>
+             <div className="flex gap-6 text-slate-400">
+               <a href="#" className="hover:text-slate-600">Privacy</a>
+               <a href="#" className="hover:text-slate-600">Terms</a>
+               <a href="#" className="hover:text-slate-600">Support</a>
+             </div>
+          </div>
+        </footer>
+      </div>
+    </div>
+  );
+};
+
+export default App;

@@ -1,0 +1,180 @@
+这是一个基于我们之前所有讨论（数据结构、权限视图、缓存策略）整理出的**全链路技术架构方案文档**。
+
+你可以直接将这份文档作为你项目的 **"Technical Design Document (TDD)"** 或 **"Architecture RFC"**，用于团队沟通或作为开发蓝本。
+
+-----
+
+# HereNow SaaS 技术架构方案 v1.0
+
+## 1\. 架构概览 (Architecture Overview)
+
+本项目采用 **Next.js (App Router)** + **Supabase (BaaS)** + **FastAPI (Service)** 的现代组合架构。
+
+  * **Next.js**: 负责前端渲染、路由控制、以及轻量级 API 代理。
+  * **Supabase**: 负责身份认证 (Auth)、核心数据存储 (Postgres)、实时订阅 (Realtime) 和文件存储 (Storage)。
+  * **FastAPI**: 作为 **"Resource Server"**，负责复杂的业务逻辑计算、支付回调处理、以及高敏感度的写入操作（如配额扣除）。
+
+### 核心数据流向图
+
+```mermaid
+graph TD
+    User[用户 Browser] -->|1. 页面渲染/SWR缓存| NextJS[Next.js Client]
+    User -->|2. 身份认证/直接读写| Supabase[Supabase (Auth + DB + RLS)]
+    User -->|3. 复杂业务操作 (带Token)| FastAPI[FastAPI Backend]
+    
+    NextJS -- Hydration --> Supabase
+    FastAPI -- 读写数据 --> Supabase
+    Supabase -- 触发器同步 --> Supabase
+```
+
+-----
+
+## 2\. 数据库设计 (Database Layer)
+
+采用 **Postgres** (Supabase)，核心原则是 **"Single Source of Truth"** 和 **"RLS 安全优先"**。
+
+### 2.1 核心表结构
+
+所有 ID 统一使用 **UUID**。
+
+| 表名 | 职责 | 关键设计点 |
+| :--- | :--- | :--- |
+| `auth.users` | **身份基石** | Supabase 系统表，不可直接修改，存储 email/password/metadata。 |
+| `public.profiles` | **用户资料** | 与 `auth.users` 1:1 绑定。包含 `primary_intent` (路由引导) 和 `is_onboarded` (状态)。 |
+| `public.plans` | **套餐定义** | 存储 SaaS 套餐。核心字段 `limits (JSONB)` 定义权益（如最大活动数）。 |
+| `public.subscriptions`| **订阅关系** | 连接用户与套餐。包含 `status`, `current_period_end`。 |
+| `public.communities` | **社群/组织** | 活动的容器。 |
+| `public.events` | **活动实体** | 核心业务表。包含 `organizer_id`。 |
+
+### 2.2 自动化与权限 (Triggers & Views)
+
+1.  **自动同步 Trigger**:
+
+      * **名称**: `handle_new_user`
+      * **作用**: 监听 `auth.users` INSERT，自动在 `public.profiles` 创建记录并同步 Google 头像/昵称。
+
+2.  **权益聚合 View (BFF Pattern)**:
+
+      * **名称**: `v_my_plan_features`
+      * **作用**: 聚合查询 `User` + `Plan` + `Subscription` + `Usage Count`。
+      * **安全**: 强制 `WHERE id = auth.uid()`，仅返回当前用户数据。
+      * **输出**: 提供给前端用于 UI 渲染（功能开关、进度条）。
+
+-----
+
+## 3\. 认证与状态管理 (Auth & State)
+
+### 3.1 认证流程 (AuthN)
+
+1.  前端调用 `supabase.auth.signInWithOAuth({ provider: 'google' })`。
+2.  登录成功，Supabase 返回 `Access Token (JWT)`。
+3.  Token 存储在 Cookie/LocalStorage (Supabase SDK 自动处理)。
+
+### 3.2 用户上下文注水 (User Context Hydration)
+
+**目标**: 登录后立即获取用户的“身份+权益+配额”。
+
+  * **策略**: **SWR (Stale-While-Revalidate)**
+  * **实现**:
+      * 在全局 `Layout` 中挂载 `UserPlanProvider`。
+      * 使用 `useSWR` 请求 `v_my_plan_features` 视图。
+      * **缓存**: 内存缓存，页面跳转 0 延迟。
+      * **更新**: 关键操作（如创建活动）后调用 `mutate()` 强制刷新。
+
+-----
+
+## 4\. 后端服务设计 (FastAPI)
+
+FastAPI 不处理登录，只处理 **鉴权 (AuthZ)** 和 **业务逻辑**。
+
+### 4.1 安全依赖 (Security Dependency)
+
+FastAPI 必须验证 Supabase 签发的 JWT。
+
+```python
+# dependencies.py
+def get_current_user(token: str = Depends(oauth2_scheme)):
+    try:
+        # 使用 Supabase JWT Secret 验签
+        payload = jwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated")
+        return payload # 返回 { "sub": "user_uuid", "role": "authenticated" }
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid Token")
+```
+
+### 4.2 职责边界
+
+什么时候用 Supabase 直连，什么时候用 FastAPI？
+
+  * **读操作 (Read)**: 90% 走 **Supabase Client** (配合 RLS)。
+      * *例: 获取活动列表、查看详情、获取我的套餐视图。*
+  * **简单写操作 (Simple Write)**: 走 **Supabase Client**。
+      * *例: 修改个人头像、更新社群描述。*
+  * **复杂写操作 (Complex Write)**: 走 **FastAPI**。
+      * *例: **发布活动** (需检查配额)、**支付Webhook** (需更新订阅状态)、**发送批量邮件**。*
+
+### 4.3 核心业务逻辑：发布活动 (Create Event)
+
+这是一个典型的跨端协作流程：
+
+1.  **前端 (Pre-check)**: 检查 `v_my_plan_features.usage`。如果已满，UI 禁用按钮。
+2.  **前端 (Request)**: POST `/api/v1/events` (携带 JWT)。
+3.  **FastAPI (Double-check)**:
+      * 解析 JWT 获取 `user_id`。
+      * 查询数据库确认 `subscriptions` 和 `events_count`。
+      * **如果配额已满**: 抛出 `403 Quota Exceeded`。
+      * **如果通过**: 写入 `events` 表。
+4.  **前端 (Post-action)**: 收到 200 OK，调用 `mutate()` 刷新权益视图，UI 进度条自动更新。
+
+-----
+
+## 5\. 前端开发规范 (Next.js)
+
+### 5.1 目录结构建议
+
+```text
+/app
+  /layout.tsx       <-- 包含 UserPlanProvider
+  /dashboard
+    /page.tsx       <-- 使用 useUserPlan() 决定显示内容
+/components
+  /QuotaBar.tsx     <-- 进度条组件
+/hooks
+  /useUserPlan.ts   <-- SWR 封装
+/supabase
+  /types.ts         <-- 数据库类型定义
+```
+
+### 5.2 权限控制代码范式
+
+**不要**在前端写死逻辑，**要**依赖数据驱动。
+
+  * ❌ 错误: `if (user.plan === 'pro') { showExport() }`
+  * ✅ 正确: `if (plan.limits.can_export_data) { showExport() }`
+
+-----
+
+## 6\. 下一步开发计划 (Checklist)
+
+1.  **数据库层**:
+
+      * [ ] 在 Supabase SQL Editor 执行 `profiles`, `plans`, `subscriptions` 建表语句。
+      * [ ] 执行 `handle_new_user` 触发器代码。
+      * [ ] 执行 `v_my_plan_features` 视图代码。
+      * [ ] 插入基础套餐数据 (Free/Pro)。
+
+2.  **后端层 (FastAPI)**:
+
+      * [ ] 配置 `SUPABASE_URL` 和 `SUPABASE_JWT_SECRET`。
+      * [ ] 实现 `get_current_user` 依赖注入。
+      * [ ] 实现 `/events` 创建接口（含后端配额检查）。
+
+3.  **前端层 (Next.js)**:
+
+      * [ ] 封装 `useUserPlan` Hook (SWR)。
+      * [ ] 完成登录页与 Dashboard 的 `UserContext` 对接。
+      * [ ] 开发“创建活动”按钮，集成 Quota 检查逻辑。
+
+-----
+
+这份文档涵盖了从数据库底层到前端体验的完整闭环，特别是强调了 **SWR + View** 的组合拳，这是你这个技术栈最高效的开发模式。
