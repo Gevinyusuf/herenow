@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { kv } from '@vercel/kv'
 import { google } from 'googleapis'
 
+// Configure Google API timeout
+const GOOGLE_API_TIMEOUT = 60000 // 60 seconds
+
 // Initialize KV client
 let kvClient: typeof kv | null = null
 try {
@@ -118,6 +121,11 @@ async function appendToGoogleSheets(email: string): Promise<void> {
   }
 
   try {
+    console.log('🔍 Starting Google Sheets authentication...')
+    console.log('📧 Service Account Email:', serviceAccountEmail)
+    console.log('🔑 Private Key Length:', privateKey.length)
+    console.log('📊 Spreadsheet ID:', spreadsheetId)
+    
     const auth = new google.auth.GoogleAuth({
       credentials: {
         client_email: serviceAccountEmail,
@@ -126,18 +134,33 @@ async function appendToGoogleSheets(email: string): Promise<void> {
       scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     })
 
-    const sheets = google.sheets({ version: 'v4', auth })
+    console.log('✅ Authentication created successfully')
+    
+    const sheets = google.sheets({ 
+      version: 'v4', 
+      auth,
+      timeout: GOOGLE_API_TIMEOUT
+    })
     const timestamp = new Date().toISOString()
+
+    console.log('📝 Attempting to append data...')
+    console.log('📧 Email:', email)
+    console.log('⏰ Timestamp:', timestamp)
 
     await sheets.spreadsheets.values.append({
       spreadsheetId,
-      range: 'HereNow-Wait-List!A:B', // Assuming Sheet1 with columns A (Email) and B (Timestamp)
+      range: 'HereNow-Wait-List!A:B',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: [[email, timestamp]],
       },
     })
+    
+    console.log('✅ Data appended successfully')
   } catch (error: any) {
+    console.error('❌ Google Sheets Error:', error)
+    console.error('Error code:', error.code)
+    console.error('Error message:', error.message)
     // Provide more detailed error information
     if (error.message?.includes('ENOTFOUND') || error.message?.includes('ECONNREFUSED')) {
       throw new Error('Failed to connect to Google API. Please check your network connection.')
@@ -213,6 +236,11 @@ export async function POST(request: NextRequest) {
       // Provide more specific error messages
       const errorMessage = error?.message || 'Failed to add email to waiting list'
       
+      console.error('❌ Google Sheets Error Details:')
+      console.error('Error Message:', errorMessage)
+      console.error('Error Code:', error?.code)
+      console.error('Full Error:', error)
+      
       // Check if it's a configuration error (should return 500, but with helpful message)
       if (errorMessage.includes('not configured') || errorMessage.includes('invalid') || errorMessage.includes('permission')) {
         return NextResponse.json(
@@ -225,7 +253,10 @@ export async function POST(request: NextRequest) {
       }
       
       return NextResponse.json(
-        { error: 'Failed to add email to waiting list. Please try again later.' },
+        { 
+          error: 'Failed to add email to waiting list. Please try again later.',
+          details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
+        },
         { status: 500 }
       )
     }

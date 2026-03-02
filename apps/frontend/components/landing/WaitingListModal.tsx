@@ -22,7 +22,7 @@ export default function WaitingListModal({ isOpen, onClose }: WaitingListModalPr
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/waiting-list', {
+      const response = await fetch('/api/waiting-list-supabase', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

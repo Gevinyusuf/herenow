@@ -9,7 +9,11 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from supabase import Client
 import calendar
-from zoneinfo import ZoneInfo
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    import pytz
+    ZoneInfo = pytz.timezone
 
 router = APIRouter()
 

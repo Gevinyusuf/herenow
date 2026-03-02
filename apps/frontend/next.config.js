@@ -4,6 +4,7 @@ const nextConfig = {
   images: {
     domains: ['api.dicebear.com', 'images.unsplash.com'],
   },
+  output: 'standalone',
 }
 
 module.exports = nextConfig
