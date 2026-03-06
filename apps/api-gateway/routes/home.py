@@ -642,72 +642,6 @@ def generate_mock_events() -> Dict[str, List[Dict[str, Any]]]:
         "past": past
     }
 
-def generate_mock_communities() -> Dict[str, List[Dict[str, Any]]]:
-    """
-    生成 mock 社群数据
-    符合前端 CommunityCard 组件的数据结构
-    """
-    my_communities = [
-        {
-            "id": 1,
-            "name": "Tim's Design Club",
-            "members": 1240,
-            "avatar": "🎨",
-            "color": "bg-purple-100",
-            "role": "Owner",
-            "isPinned": False,
-            "createdAt": "2023-08-15"
-        },
-        {
-            "id": 2,
-            "name": "AI Enthusiasts",
-            "members": 856,
-            "avatar": "🤖",
-            "color": "bg-green-100",
-            "role": "Owner",
-            "isPinned": False,
-            "createdAt": "2024-05-10"
-        },
-        {
-            "id": 3,
-            "name": "Weekend Hikers",
-            "members": 42,
-            "avatar": "🏔️",
-            "color": "bg-orange-100",
-            "role": "Owner",
-            "isPinned": False,
-            "createdAt": "2024-11-01"
-        }
-    ]
-    
-    joined_communities = [
-        {
-            "id": 101,
-            "name": "React Developers",
-            "members": 15400,
-            "avatar": "⚛️",
-            "color": "bg-blue-100",
-            "newPosts": 5,
-            "isPinned": False,
-            "joinedAt": "2022-11-01"
-        },
-        {
-            "id": 102,
-            "name": "Startup Grinders",
-            "members": 3200,
-            "avatar": "🚀",
-            "color": "bg-rose-100",
-            "newPosts": 0,
-            "isPinned": False,
-            "joinedAt": "2024-04-15"
-        }
-    ]
-    
-    return {
-        "myCommunities": my_communities,
-        "joinedCommunities": joined_communities
-    }
-
 @router.get("/home/events")
 async def get_home_events(current_user: dict = Depends(get_current_user)):
     """
@@ -730,13 +664,92 @@ async def get_home_events(current_user: dict = Depends(get_current_user)):
         "data": events_data
     }
 
+async def get_user_communities_from_db(user_id: str) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    从数据库获取用户的社群数据
+    包括用户创建的社群（作为 owner）和加入的社群
+    """
+    try:
+        supabase = get_supabase()
+        print(f"🔍 查询用户 {user_id} 的社群...")
+
+        # 1. 查询用户创建的社群（通过 owner_id）
+        my_communities_result = supabase.table("communities").select(
+            "id, name, description, logo_url, cover_image_url, members_count, events_count, settings, created_at, updated_at"
+        ).eq("owner_id", user_id).order("created_at", desc=True).execute()
+
+        my_communities = []
+        if my_communities_result.data:
+            print(f"📊 找到 {len(my_communities_result.data)} 个创建的社群")
+            for community in my_communities_result.data:
+                my_communities.append({
+                    "id": str(community.get("id")),
+                    "name": community.get("name", ""),
+                    "members": community.get("members_count", 0),
+                    "avatar": "🎨",  # 默认头像，可以从 logo_url 获取
+                    "color": "bg-purple-100",  # 默认颜色，可以从 settings 获取
+                    "role": "Owner",
+                    "isPinned": False,
+                    "createdAt": community.get("created_at", "").split('T')[0] if community.get("created_at") else ""
+                })
+        else:
+            print("ℹ️ 用户没有创建的社群")
+
+        # 2. 查询用户加入的社群（通过 community_members 表）
+        joined_communities_result = supabase.table("community_members").select(
+            "community_id, role, status, joined_at, communities!inner(id, name, description, logo_url, cover_image_url, members_count, events_count, settings, created_at, updated_at)"
+        ).eq("user_id", user_id).eq("status", "active").order("joined_at", desc=True).execute()
+
+        joined_communities = []
+        if joined_communities_result.data:
+            print(f"📊 找到 {len(joined_communities_result.data)} 个加入的社群")
+            for membership in joined_communities_result.data:
+                community = membership.get("communities", {})
+                joined_communities.append({
+                    "id": str(community.get("id")),
+                    "name": community.get("name", ""),
+                    "members": community.get("members_count", 0),
+                    "avatar": "🤖",  # 默认头像
+                    "color": "bg-blue-100",  # 默认颜色
+                    "role": membership.get("role", "member"),
+                    "isPinned": False,
+                    "joinedAt": membership.get("joined_at", "").split('T')[0] if membership.get("joined_at") else "",
+                    "newPosts": 0  # 暂时设置为 0，后续可以从 posts 表获取
+                })
+        else:
+            print("ℹ️ 用户没有加入的社群")
+
+        print(f"📋 最终结果: {len(my_communities)} 个创建的社群, {len(joined_communities)} 个加入的社群")
+
+        return {
+            "myCommunities": my_communities,
+            "joinedCommunities": joined_communities
+        }
+
+    except Exception as e:
+        print(f"❌ 查询用户社群失败: {e}")
+        import traceback
+        traceback.print_exc()
+        # 出错时返回空数据，而不是抛出异常
+        return {
+            "myCommunities": [],
+            "joinedCommunities": []
+        }
+
 @router.get("/home/communities")
-async def get_home_communities(current_user: dict = get_current_user):
+async def get_home_communities(current_user: dict = Depends(get_current_user)):
     """
     获取首页社群数据
     需要认证
     """
-    communities_data = generate_mock_communities()
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="用户信息无效"
+        )
+
+    communities_data = await get_user_communities_from_db(user_id)
     return {
         "success": True,
         "data": communities_data
@@ -754,12 +767,12 @@ async def get_home_all_data(current_user: dict = Depends(get_current_user)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户信息无效"
         )
-    
+
     # 从数据库查询用户的活动（参与 + 创建）
     events_data = await get_user_events(user_id)
-    # 社群数据暂时使用 mock（后续可以改为从数据库查询）
-    communities_data = generate_mock_communities()
-    
+    # 从数据库查询用户的社群
+    communities_data = await get_user_communities_from_db(user_id)
+
     return {
         "success": True,
         "data": {

@@ -5,13 +5,14 @@ import { Calendar, CalendarDays, Users, Compass, Search, Bell, Plus } from 'luci
 import Link from 'next/link';
 import NavLink from './NavLink';
 import UserMenu from './UserMenu';
+import Notifications from './Notifications';
 
 interface NavbarProps {
   onCreateEventClick?: () => void;
   variant?: 'default' | 'fixed'; // default: 普通导航, fixed: 固定导航（带滚动效果）
   showTime?: boolean;
-  currentView?: 'events' | 'communities';
-  onViewChange?: (view: 'events' | 'communities') => void;
+  currentView?: 'events' | 'communities' | 'my-events' | 'my-communities';
+  onViewChange?: (view: 'events' | 'communities' | 'my-events' | 'my-communities') => void;
   canAccessCommunity?: boolean;
   canAccessDiscover?: boolean;
 }
@@ -48,12 +49,7 @@ export default function Navbar({
       
       const timeString = timeFormatter.format(now);
       
-      // 获取时区偏移量 (GMT+X)
-      const timezoneOffset = -now.getTimezoneOffset() / 60; // 转换为小时
-      const timezoneSign = timezoneOffset >= 0 ? '+' : '-';
-      const timezoneString = `GMT${timezoneSign}${Math.abs(timezoneOffset)}`;
-      
-      setCurrentTimeDisplay(`${timeString} ${timezoneString}`);
+      setCurrentTimeDisplay(timeString);
     };
 
     // 立即更新一次
@@ -119,15 +115,9 @@ export default function Navbar({
             )}
 
             <div className="flex items-center space-x-2">
-              <button className="p-3 hover:bg-slate-100 rounded-full transition-colors text-[#64748B]">
-                <Search className="w-6 h-6" strokeWidth={2} />
-              </button>
-              <button className="p-3 hover:bg-slate-100 rounded-full transition-colors text-[#64748B] relative">
-                <Bell className="w-6 h-6" strokeWidth={2} />
-                <span className="absolute top-2.5 right-2.5 w-2 h-2 bg-[#FF6B3D] rounded-full border border-white"></span>
-              </button>
-              <UserMenu />
-            </div>
+            <Notifications />
+            <UserMenu />
+          </div>
           </div>
         </div>
       </header>
@@ -160,20 +150,48 @@ export default function Navbar({
               </span>
               <span>Events</span>
             </button>
+            <button
+              onClick={() => onViewChange?.('my-events')}
+              className={`flex items-center gap-2 px-1 py-1 text-base font-semibold transition-all duration-200 group ${
+                currentView === 'my-events'
+                  ? 'text-slate-900'
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              <span className={currentView === 'my-events' ? 'text-[#FF6B3D]' : 'text-slate-400 group-hover:text-slate-600'}>
+                <CalendarDays size={18} />
+              </span>
+              <span>My Events</span>
+            </button>
             {canAccessCommunity && (
-              <button
-                onClick={() => onViewChange?.('communities')}
-                className={`flex items-center gap-2 px-1 py-1 text-base font-semibold transition-all duration-200 group ${
-                  currentView === 'communities'
-                    ? 'text-slate-900'
-                    : 'text-slate-500 hover:text-slate-900'
-                }`}
-              >
-                <span className={currentView === 'communities' ? 'text-[#FF6B3D]' : 'text-slate-400 group-hover:text-slate-600'}>
-                  <Users size={18} />
-                </span>
-                <span>Communities</span>
-              </button>
+              <>
+                <button
+                  onClick={() => onViewChange?.('communities')}
+                  className={`flex items-center gap-2 px-1 py-1 text-base font-semibold transition-all duration-200 group ${
+                    currentView === 'communities'
+                      ? 'text-slate-900'
+                      : 'text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  <span className={currentView === 'communities' ? 'text-[#FF6B3D]' : 'text-slate-400 group-hover:text-slate-600'}>
+                    <Users size={18} />
+                  </span>
+                  <span>Communities</span>
+                </button>
+                <button
+                  onClick={() => onViewChange?.('my-communities')}
+                  className={`flex items-center gap-2 px-1 py-1 text-base font-semibold transition-all duration-200 group ${
+                    currentView === 'my-communities'
+                      ? 'text-slate-900'
+                      : 'text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  <span className={currentView === 'my-communities' ? 'text-[#FF6B3D]' : 'text-slate-400 group-hover:text-slate-600'}>
+                    <Users size={18} />
+                  </span>
+                  <span>My Communities</span>
+                </button>
+              </>
             )}
             {canAccessDiscover && (
               <NavLink icon={<Compass size={18} />} text="Discover" href="/discover" />
@@ -213,10 +231,7 @@ export default function Navbar({
           )}
 
           <div className="flex items-center space-x-2">
-            <button className="p-3 hover:bg-slate-100 rounded-full transition-colors text-[#64748B] relative">
-              <Bell className="w-6 h-6" strokeWidth={2} />
-              <span className="absolute top-2.5 right-2.5 w-2 h-2 bg-[#FF6B3D] rounded-full border border-white"></span>
-            </button>
+            <Notifications />
             <UserMenu />
           </div>
         </div>

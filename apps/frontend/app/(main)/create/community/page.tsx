@@ -99,9 +99,71 @@ export default function CreateCommunityPage() {
     setShowCitySearch(false);
   };
   
-  const handleCreate = () => {
-    console.log("Creating community:", { ...formData, inviteMethods });
-    router.push('/home?view=communities');
+  const [isCreating, setIsCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleCreate = async () => {
+    if (!formData.name.trim()) {
+      setError('请输入社群名称');
+      return;
+    }
+
+    if (!formData.slug.trim()) {
+      setError('请输入社群 URL');
+      return;
+    }
+
+    setIsCreating(true);
+    setError(null);
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError('请先登录');
+        setIsCreating(false);
+        return;
+      }
+
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_GATEWAY_URL}/api/v1/communities`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: formData.name,
+          slug: formData.slug,
+          description: formData.description,
+          theme_color: formData.themeColor,
+          privacy: formData.privacy,
+          location_type: formData.locationType,
+          location: formData.location,
+          city: formData.city,
+          cover_image_url: formData.coverImage,
+          invite_link: inviteMethods.link,
+          invite_email: inviteMethods.email
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || '创建社群失败');
+      }
+
+      const data = await response.json();
+
+      if (data.success) {
+        console.log('✅ 社群创建成功:', data.data);
+        router.push('/home?view=communities');
+      } else {
+        throw new Error(data.message || '创建社群失败');
+      }
+    } catch (err) {
+      console.error('❌ 创建社群失败:', err);
+      setError(err instanceof Error ? err.message : '创建社群失败，请重试');
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   const handleBack = () => {
@@ -572,18 +634,35 @@ export default function CreateCommunityPage() {
            <div className="w-px h-6 bg-slate-200"></div>
            <button 
             onClick={handleCreate}
+            disabled={isCreating || !formData.name}
             className={`px-8 py-3 rounded-3xl font-bold shadow-lg flex items-center gap-2 transition-all ${
-              formData.name 
+              formData.name && !isCreating
                 ? 'bg-[#FF6B3D] text-white shadow-orange-500/30 hover:shadow-orange-500/50' 
                 : 'bg-slate-200 text-slate-400 cursor-not-allowed'
             }`}
-            disabled={!formData.name}
            >
-             <span>Create Community</span>
-             <ChevronRight size={18} strokeWidth={3} />
+             {isCreating ? (
+               <>
+                 <span>Creating...</span>
+               </>
+             ) : (
+               <>
+                 <span>Create Community</span>
+                 <ChevronRight size={18} strokeWidth={3} />
+               </>
+             )}
            </button>
         </div>
       </div>
+
+      {/* Error Message */}
+      {error && (
+        <div className="fixed bottom-32 left-0 right-0 z-50 flex justify-center px-4">
+          <div className="bg-red-500 text-white px-6 py-3 rounded-xl shadow-lg max-w-md">
+            <p className="text-sm font-medium">{error}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

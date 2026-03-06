@@ -294,6 +294,25 @@ export async function getEventRegistrations(eventId: string, limit: number = 5) 
   }
 }
 
+/**
+ * 获取当前用户对指定活动的注册状态
+ * 返回用户是否已注册、注册状态和注册详情
+ */
+export async function getEventRegistrationStatus(eventId: string) {
+  try {
+    const response = await authenticatedFetch(`/api/v1/events/${eventId}/registration-status`);
+    const result = await response.json();
+    return result.data || {
+      is_registered: false,
+      status: null,
+      registration: null
+    };
+  } catch (error) {
+    console.error('❌ getEventRegistrationStatus 失败:', error);
+    throw error;
+  }
+}
+
 
 /**
  * 获取活动评论列表（支持分页）
@@ -698,6 +717,69 @@ export async function importEventFromImage(imageFile: File, additionalText: stri
     return result;
   } catch (error) {
     console.error('❌ import event from image failed:', error);
+    throw error;
+  }
+}
+
+/**
+ * 获取当前用户资料
+ */
+export async function getUserProfile() {
+  try {
+    const response = await authenticatedFetch('/api/v1/users/me');
+    const result = await response.json();
+    return result.data || result;
+  } catch (error) {
+    console.error('❌ getUserProfile 失败:', error);
+    throw error;
+  }
+}
+
+/**
+ * 更新当前用户资料
+ * @param updateData 更新数据 { full_name?: string, avatar_url?: string }
+ */
+export async function updateUserProfile(updateData: {
+  full_name?: string;
+  avatar_url?: string;
+}) {
+  try {
+    const response = await authenticatedFetch('/api/v1/users/me', {
+      method: 'PATCH',
+      body: JSON.stringify(updateData),
+    });
+    const result = await response.json();
+    return result.data || result;
+  } catch (error) {
+    console.error('❌ updateUserProfile 失败:', error);
+    throw error;
+  }
+}
+
+/**
+ * 获取当前用户的活动列表（创建的和参与的）
+ */
+export async function getUserEvents() {
+  try {
+    const response = await authenticatedFetch('/api/v1/users/me/events');
+    const result = await response.json();
+    return result.data || result;
+  } catch (error) {
+    console.error('❌ getUserEvents 失败:', error);
+    throw error;
+  }
+}
+
+/**
+ * 获取当前用户的社群列表（加入的和创建的）
+ */
+export async function getUserCommunities() {
+  try {
+    const response = await authenticatedFetch('/api/v1/users/me/communities');
+    const result = await response.json();
+    return result.data || result;
+  } catch (error) {
+    console.error('❌ getUserCommunities 失败:', error);
     throw error;
   }
 }

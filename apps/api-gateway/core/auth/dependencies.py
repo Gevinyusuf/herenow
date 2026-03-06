@@ -10,16 +10,9 @@ load_dotenv()
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-import jwt
 from typing import Dict, Optional
 from supabase import Client
 from core.supabase_client import get_supabase_client
-
-# 从环境变量获取 JWT Secret
-SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
-
-if not SUPABASE_JWT_SECRET:
-    print("警告: SUPABASE_JWT_SECRET 未设置，JWT 验证将无法正常工作")
 
 security = HTTPBearer()
 
@@ -28,6 +21,8 @@ def get_current_user(
 ) -> Dict:
     """
     验证 Supabase JWT Token 并返回用户信息
+    
+    使用 Supabase SDK 验证 token，避免手动处理 ES256 算法的复杂性
     
     Args:
         credentials: HTTP Bearer Token
@@ -45,30 +40,28 @@ def get_current_user(
     """
     token = credentials.credentials
     
-    if not SUPABASE_JWT_SECRET:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="JWT secret not configured"
-        )
-    
     try:
-        payload = jwt.decode(
-            token,
-            SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-            audience="authenticated"
-        )
-        return {
-            "sub": payload.get("sub"),  # user_id (UUID)
-            "role": payload.get("role"),  # "authenticated"
-            "email": payload.get("email"),
-        }
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token expired"
-        )
-    except jwt.InvalidTokenError as e:
+        supabase = get_supabase_client()
+        
+        # 使用 Supabase SDK 验证 token
+        # Supabase SDK 会自动处理 ES256 算法验证
+        user = supabase.auth.get_user(token)
+        
+        if user and user.user:
+            print(f"✅ Token verified successfully for user: {user.user.email}")
+            return {
+                "sub": user.user.id,
+                "role": user.user.role or "authenticated",
+                "email": user.user.email,
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token: User not found"
+            )
+            
+    except Exception as e:
+        print(f"❌ Token verification failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid token: {str(e)}"

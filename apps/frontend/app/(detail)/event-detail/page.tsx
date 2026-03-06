@@ -26,7 +26,7 @@ import AuthModal from '@/components/detail/AuthModal';
 import DiscussionSection from '@/components/detail/DiscussionSection';
 import Navbar from '@/components/home/Navbar';
 import EffectLayer from '@/components/create/EffectLayer';
-import { getEvent, registerEvent, getEventRegistrations, getGalleryPhotos, toggleGalleryPhotoLike, getEventResources } from '@/lib/api/client';
+import { getEvent, registerEvent, getEventRegistrations, getEventRegistrationStatus, getGalleryPhotos, toggleGalleryPhotoLike, getEventResources } from '@/lib/api/client';
 import { createClient } from '@/lib/supabase/client';
 import { MapPreview } from '@/components/create/MapPreview';
 import { LocationCoordinates } from '@/components/create/LocationMap';
@@ -501,10 +501,8 @@ function EventDetailPageContent() {
           const supabase = createClient();
           const { data: { session } } = await supabase.auth.getSession();
           if (session?.user) {
-            // TODO: 调用 API 检查注册状态
-            // 暂时简化处理，实际应该调用后端 API
-            const regResult = await getEventRegistrations(eventId, 1);
-            setIsRegistered(regResult.total > 0);
+            const regStatus = await getEventRegistrationStatus(eventId);
+            setIsRegistered(regStatus.is_registered);
           }
         } catch (error) {
           console.error('检查注册状态失败:', error);

@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import iterate_in_threadpool
 from core.auth.dependencies import get_current_user
 from core.supabase_client import initialize_client
-from routes import home, auth, events, ai
+from routes import home, auth, events, ai, users, communities
 import logging
 
 app = FastAPI(
@@ -32,6 +32,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 环境变量自动重载中间件
+@app.middleware("http")
+async def auto_reload_env(request: Request, call_next):
+    """每次请求时都重新加载环境变量"""
+    load_dotenv()
+    response = await call_next(request)
+    return response
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -133,6 +141,8 @@ app.include_router(auth.router, prefix="/api/v1", tags=["认证"])
 app.include_router(home.router, prefix="/api/v1", tags=["首页"])
 app.include_router(events.router, prefix="/api/v1", tags=["活动"])
 app.include_router(ai.router, prefix="/api/v1", tags=["AI"])
+app.include_router(users.router, prefix="/api/v1", tags=["用户"])
+app.include_router(communities.router, prefix="/api/v1", tags=["社群"])
 
 @app.get("/")
 async def root():

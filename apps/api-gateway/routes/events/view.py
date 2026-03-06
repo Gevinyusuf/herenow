@@ -652,4 +652,77 @@ async def toggle_comment_like(
             detail=f"like operation failed: {str(e)}"
         )
 
+@router.get("/events/{event_id}/registration-status")
+async def get_registration_status(
+    event_id: str,
+    current_user: Optional[Dict] = Depends(get_current_user_optional)
+):
+    """
+    检查当前用户对指定活动的注册状态
+    返回用户是否已注册、注册状态和注册详情
+    """
+    try:
+        supabase = get_supabase()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"database connection failed: {str(e)}"
+        )
+    
+    try:
+        user_id = current_user.get("sub") if current_user else None
+        
+        if not user_id:
+            return {
+                "success": True,
+                "data": {
+                    "is_registered": False,
+                    "status": None,
+                    "registration": None
+                }
+            }
+        
+        registration_result = supabase.table("event_registrations").select(
+            "id, status, form_answers, ticket_code, checked_in_at, email, first_name, last_name, avatar_url, created_at"
+        ).eq("event_id", event_id).eq("user_id", user_id).execute()
+        
+        if not registration_result.data:
+            return {
+                "success": True,
+                "data": {
+                    "is_registered": False,
+                    "status": None,
+                    "registration": None
+                }
+            }
+        
+        registration = registration_result.data[0]
+        
+        return {
+            "success": True,
+            "data": {
+                "is_registered": True,
+                "status": registration.get("status"),
+                "registration": {
+                    "id": registration.get("id"),
+                    "status": registration.get("status"),
+                    "form_answers": registration.get("form_answers"),
+                    "ticket_code": registration.get("ticket_code"),
+                    "checked_in_at": registration.get("checked_in_at"),
+                    "email": registration.get("email"),
+                    "first_name": registration.get("first_name"),
+                    "last_name": registration.get("last_name"),
+                    "avatar_url": registration.get("avatar_url"),
+                    "created_at": registration.get("created_at")
+                }
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"get registration status failed: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"get registration status failed: {str(e)}"
+        )
+
 

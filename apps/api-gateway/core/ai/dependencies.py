@@ -132,8 +132,34 @@ async def verify_ai_quota(
             }
         ).execute()
         
-        # 如果返回 False，说明配额不足
-        if not response.data:
+        # 检查返回结果（可能是单行或多行）
+        if response.data is None:
+            # RPC 函数返回 null，说明配额不足
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="AI generation quota exceeded. Please upgrade your plan."
+            )
+        
+        # 处理返回结果（可能是单行或多行）
+        result = response.data
+        
+        # 如果返回的是列表，取第一行的返回值
+        if isinstance(result, list):
+            if len(result) > 0:
+                # 有多行，取第一行的返回值
+                quota_sufficient = result[0].get('check_and_increment_quota', False)
+                print(f"✅ RPC returned {len(result)} rows, using first row's result: {quota_sufficient}")
+            else:
+                # 空列表，配额不足
+                quota_sufficient = False
+                print(f"⚠️ RPC returned empty list, quota insufficient")
+        else:
+            # 单行结果（字典）
+            quota_sufficient = result.get('check_and_increment_quota', False)
+            print(f"✅ RPC returned single row, result: {quota_sufficient}")
+        
+        # 如果配额不足，抛出异常
+        if not quota_sufficient:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="AI generation quota exceeded. Please upgrade your plan."

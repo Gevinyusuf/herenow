@@ -69,10 +69,10 @@ export function useEntitlements() {
       .from('v_user_entitlements')
       .select('*')
       .eq('user_id', user.id)
-      .single();
+      .limit(1);
 
     if (error) throw error;
-    return data as EntitlementsData | null;
+    return data && data.length > 0 ? data[0] as EntitlementsData : null;
   };
 
   // 使用 SWR 缓存，避免重复请求

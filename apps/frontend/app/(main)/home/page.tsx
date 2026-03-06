@@ -17,13 +17,14 @@ import {
   Download,
   Users,
   Trash2,
+  User,
 } from 'lucide-react';
 import Navbar from '@/components/home/Navbar';
 import Footer from '@/components/home/Footer';
 import ImportModal from '@/components/home/ImportModal';
 import CommunityCard from '@/components/home/CommunityCard';
 import EventCard from '@/components/home/EventCard';
-import { getHomeData, deleteEvent } from '@/lib/api/client';
+import { getHomeData, deleteEvent, getUserEvents, getUserCommunities } from '@/lib/api/client';
 import { useEntitlements } from '@/hooks/useEntitlements';
 
 interface Event {
@@ -103,7 +104,7 @@ function HomePageContent() {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const { canAccessCommunity, canAccessDiscover, isLoading: entitlementsLoading } = useEntitlements();
-  const [currentView, setCurrentView] = useState<'events' | 'communities'>('events');
+  const [currentView, setCurrentView] = useState<'events' | 'communities' | 'my-events' | 'my-communities'>('events');
   const [activeTab, setActiveTab] = useState<'upcoming' | 'past'>('upcoming');
   const [isHoveringCreate, setIsHoveringCreate] = useState(false);
 
@@ -111,9 +112,14 @@ function HomePageContent() {
   useEffect(() => {
     const view = searchParams.get('view');
     if (view === 'communities') {
-      // 检查权限，如果没有权限则保持在 events 视图
       if (canAccessCommunity) {
         setCurrentView('communities');
+      } else {
+        setCurrentView('events');
+      }
+    } else if (view === 'my-communities') {
+      if (canAccessCommunity) {
+        setCurrentView('my-communities');
       } else {
         setCurrentView('events');
       }
@@ -122,16 +128,84 @@ function HomePageContent() {
     }
   }, [searchParams, canAccessCommunity]);
 
-  // 处理视图切换，检查权限
-  const handleViewChange = (view: 'events' | 'communities') => {
+  const [myEvents, setMyEvents] = useState<any[]>([]);
+  const [myEventsLoading, setMyEventsLoading] = useState(false);
+  const [myEventsError, setMyEventsError] = useState('');
+
+  const [myUserCommunities, setMyUserCommunities] = useState<any[]>([]);
+  const [myUserCommunitiesLoading, setMyUserCommunitiesLoading] = useState(false);
+  const [myUserCommunitiesError, setMyUserCommunitiesError] = useState('');
+
+  useEffect(() => {
+    const loadMyEvents = async () => {
+      try {
+        setMyEventsLoading(true);
+        setMyEventsError('');
+        const data = await getUserEvents();
+        setMyEvents(data.events || []);
+      } catch (err) {
+        setMyEventsError('Failed to load your events');
+        console.error(err);
+      } finally {
+        setMyEventsLoading(false);
+      }
+    };
+
+    const loadMyUserCommunities = async () => {
+      try {
+        setMyUserCommunitiesLoading(true);
+        setMyUserCommunitiesError('');
+        const data = await getUserCommunities();
+        setMyUserCommunities(data.communities || []);
+      } catch (err) {
+        setMyUserCommunitiesError('Failed to load your communities');
+        console.error(err);
+      } finally {
+        setMyUserCommunitiesLoading(false);
+      }
+    };
+
+    if (currentView === 'my-events') {
+      loadMyEvents();
+    } else if (currentView === 'my-communities') {
+      loadMyUserCommunities();
+    }
+  }, [currentView]);
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  };
+
+  const formatTime = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+  };
+
+  const handleNavigateToCreateEvent = () => {
+    router.push('/create/event');
+  };
+
+  const handleNavigateToCreateCommunity = () => {
+    router.push('/create/community');
+  };
+
+  const handleViewChange = (view: 'events' | 'communities' | 'my-events') => {
     if (view === 'communities' && !canAccessCommunity) {
-      // 如果没有权限，显示提示或阻止切换
       alert('您当前的套餐不支持访问 Communities 功能，请升级套餐后使用。');
       return;
     }
     setCurrentView(view);
   };
-  
+
   // Search, Filter, Pagination
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState('all'); 
@@ -191,35 +265,52 @@ function HomePageContent() {
   );
 
   // Import Handler
-  const handleImport = () => {
+  const handleImport = async () => {
     if (!importUrl) return;
     setImportStatus('loading');
     
-    // Simulate API call
-    setTimeout(() => {
-      setImportStatus('success');
-      // Mock adding event after delay
-      setTimeout(() => {
-        const newEvent: Event = {
-          id: Date.now(),
-          title: "Imported Event: Tech Mixer",
-          date: "DEC 10",
-          time: "6:00 PM",
-          location: "Imported Location",
-          imageColor: "from-indigo-500 to-purple-600",
-          category: "next-month"
+    try {
+      const response = await fetch(`${API_GATEWAY_URL}/api/v1/ai/import-from-link`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ url: importUrl }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Import failed: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        const importedEvent: Event = {
+          id: data.data.id || Date.now(),
+          title: data.data.title || 'Imported Event',
+          date: data.data.date || new Date().toISOString().split('T')[0],
+          time: data.data.time || '6:00 PM',
+          location: data.data.location || 'Imported Location',
+          imageColor: data.data.imageColor || 'from-indigo-500 to-purple-600',
+          category: data.data.category || 'next-month'
         };
         
         setEventsData(prev => ({
           ...prev,
-          upcoming: [newEvent, ...prev.upcoming]
+          upcoming: [importedEvent, ...prev.upcoming]
         }));
         
         setImportUrl('');
-        setImportStatus('idle');
+        setImportStatus('success');
         setIsImportModalOpen(false);
-      }, 1000);
-    }, 1500);
+      } else {
+        throw new Error(data.message || 'Import failed');
+      }
+    } catch (error) {
+      console.error('Import error:', error);
+      setImportStatus('error');
+    }
   };
 
   const handleImportUrlChange = (url: string) => {
@@ -327,11 +418,11 @@ function HomePageContent() {
         
         // 设置社群数据
         if (data?.communities) {
-          setMyCommunities(data.communities.myCommunities || []);
+          setMyUserCommunities(data.communities.myCommunities || []);
           setJoinedCommunities(data.communities.joinedCommunities || []);
         } else {
           console.warn('⚠️ 返回数据中没有 communities 字段');
-          setMyCommunities([]);
+          setMyUserCommunities([]);
           setJoinedCommunities([]);
         }
       },
@@ -383,9 +474,39 @@ function HomePageContent() {
     }));
   };
 
-  const handleDeleteMy = (id: number) => {
+  const handleDeleteMy = async (id: number) => {
     if (typeof window !== 'undefined' && window.confirm("Are you sure you want to delete this community? This cannot be undone.")) {
-      setMyCommunities(prev => prev.filter(c => c.id !== id));
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          alert('请先登录');
+          return;
+        }
+
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_GATEWAY_URL}/api/v1/communities/${id}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || '删除社群失败');
+        }
+
+        const data = await response.json();
+
+        if (data.success) {
+          console.log('✅ 删除社群成功:', id);
+          setMyCommunities(prev => prev.filter(c => c.id !== id));
+        } else {
+          throw new Error(data.message || '删除社群失败');
+        }
+      } catch (err) {
+        console.error('❌ 删除社群失败:', err);
+        alert(err instanceof Error ? err.message : '删除社群失败，请重试');
+      }
     }
   };
 
@@ -396,22 +517,44 @@ function HomePageContent() {
     }));
   };
 
-  const handleLeaveJoined = (id: number) => {
+  const handleLeaveJoined = async (id: number) => {
     if (typeof window !== 'undefined' && window.confirm("Are you sure you want to leave this community?")) {
-      setJoinedCommunities(prev => prev.filter(c => c.id !== id));
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          alert('请先登录');
+          return;
+        }
+
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_GATEWAY_URL}/api/v1/communities/${id}/leave`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || '离开社群失败');
+        }
+
+        const data = await response.json();
+
+        if (data.success) {
+          console.log('✅ 离开社群成功:', id);
+          setJoinedCommunities(prev => prev.filter(c => c.id !== id));
+        } else {
+          throw new Error(data.message || '离开社群失败');
+        }
+      } catch (err) {
+        console.error('❌ 离开社群失败:', err);
+        alert(err instanceof Error ? err.message : '离开社群失败，请重试');
+      }
     }
   };
 
-  const handleNavigateToCreateCommunity = () => {
-    router.push('/create/community');
-  };
-
-  const handleNavigateToCreateEvent = () => {
-    router.push('/create/event');
-  };
-
   // 排序逻辑：置顶的排在前面
-  const sortedMyCommunities = [...myCommunities].sort((a, b) => {
+  const sortedMyCommunities = [...myUserCommunities].sort((a, b) => {
     return (b.isPinned === true ? 1 : 0) - (a.isPinned === true ? 1 : 0);
   });
 
@@ -484,7 +627,220 @@ function HomePageContent() {
         </div>
 
         {/* Content Area */}
-        {currentView === 'communities' ? (
+        {currentView === 'my-events' ? (
+          <div className="animate-fade-in-up" style={{ animationDelay: '0.2s' }}>
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h1 className="text-5xl md:text-7xl font-brand font-extrabold tracking-tight leading-[1.1] mb-4">
+                  <span className="text-slate-900">My </span>
+                  <span className="bg-gradient-to-r from-[#FF6B3D] to-[#FF9E7D] bg-clip-text text-transparent">Events</span>
+                </h1>
+                <p className="text-lg md:text-xl text-slate-500 font-medium leading-relaxed">
+                  Manage your created and registered events
+                </p>
+              </div>
+              <button
+                onClick={handleNavigateToCreateEvent}
+                className="px-6 py-3 bg-[#FF6B3D] text-white rounded-xl font-bold hover:bg-[#FF855F] transition-colors flex items-center gap-2"
+              >
+                <Plus className="w-5 h-5" />
+                Create Event
+              </button>
+            </div>
+
+            {myEventsLoading ? (
+              <div className="text-center py-12">
+                <div className="text-slate-500">Loading your events...</div>
+              </div>
+            ) : myEventsError ? (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+                {myEventsError}
+              </div>
+            ) : myEvents.length === 0 ? (
+              <div className="text-center py-12">
+                <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                  <Calendar className="w-8 h-8 text-slate-300" />
+                </div>
+                <h3 className="text-xl font-semibold text-slate-700 mb-2">No events found</h3>
+                <p className="text-slate-500 mb-6">
+                  You haven't created or registered for any events yet.
+                </p>
+                <button
+                  onClick={handleNavigateToCreateEvent}
+                  className="px-6 py-3 bg-[#FF6B3D] text-white rounded-xl font-bold hover:bg-[#FF855F] transition-colors flex items-center gap-2 mx-auto"
+                >
+                  <Plus className="w-5 h-5" />
+                  Create Your First Event
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {myEvents.map((event) => (
+                  <div
+                    key={event.id}
+                    className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition-shadow group"
+                  >
+                    {event.cover_image_url ? (
+                      <div className="h-48 overflow-hidden">
+                        <img
+                          src={event.cover_image_url}
+                          alt={event.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      </div>
+                    ) : (
+                      <div className="h-48 bg-gradient-to-br from-[#FF6B3D] to-[#FF855F] flex items-center justify-center">
+                        <Calendar className="w-16 h-16 text-white opacity-50" />
+                      </div>
+                    )}
+
+                    <div className="p-6">
+                      <div className="flex items-center gap-2 mb-3">
+                        {event.is_created && (
+                          <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">
+                            Created
+                          </span>
+                        )}
+                        {event.is_registered && (
+                          <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">
+                            Registered
+                          </span>
+                        )}
+                      </div>
+
+                      <h3 className="text-xl font-bold text-slate-900 mb-3 line-clamp-2">
+                        {event.title}
+                      </h3>
+
+                      <div className="space-y-2 text-sm text-slate-600">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-4 h-4" />
+                          <span>{formatDate(event.start_at)}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Clock className="w-4 h-4" />
+                          <span>
+                            {formatTime(event.start_at)} - {formatTime(event.end_at)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Users className="w-4 h-4" />
+                          <span>{event.registration_count} registered</span>
+                        </div>
+                        {event.location_info?.name && (
+                          <div className="flex items-center gap-2">
+                            <MapPin className="w-4 h-4" />
+                            <span className="line-clamp-1">{event.location_info.name}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : currentView === 'my-communities' ? (
+          <div className="animate-fade-in-up" style={{ animationDelay: '0.2s' }}>
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h1 className="text-5xl md:text-7xl font-brand font-extrabold tracking-tight leading-[1.1] mb-4">
+                  <span className="text-slate-900">My </span>
+                  <span className="bg-gradient-to-r from-[#FF6B3D] to-[#FF9E7D] bg-clip-text text-transparent">Communities</span>
+                </h1>
+                <p className="text-lg md:text-xl text-slate-500 font-medium leading-relaxed">
+                  Manage your joined and created communities
+                </p>
+              </div>
+              <button
+                onClick={handleNavigateToCreateCommunity}
+                className="px-6 py-3 bg-[#FF6B3D] text-white rounded-xl font-bold hover:bg-[#FF855F] transition-colors flex items-center gap-2"
+              >
+                <Plus className="w-5 h-5" />
+                Create Community
+              </button>
+            </div>
+
+            {myUserCommunitiesLoading ? (
+              <div className="text-center py-12">
+                <div className="text-slate-500">Loading your communities...</div>
+              </div>
+            ) : myUserCommunitiesError ? (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+                {myUserCommunitiesError}
+              </div>
+            ) : myUserCommunities.length === 0 ? (
+              <div className="text-center py-12">
+                <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                  <Users className="w-8 h-8 text-slate-300" />
+                </div>
+                <h3 className="text-xl font-semibold text-slate-700 mb-2">No communities found</h3>
+                <p className="text-slate-500 mb-6">
+                  You haven't joined or created any communities yet.
+                </p>
+                <button
+                  onClick={handleNavigateToCreateCommunity}
+                  className="px-6 py-3 bg-[#FF6B3D] text-white rounded-xl font-bold hover:bg-[#FF855F] transition-colors flex items-center gap-2 mx-auto"
+                >
+                  <Plus className="w-5 h-5" />
+                  Create Your First Community
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {myUserCommunities.map((community) => (
+                  <div
+                    key={community.id}
+                    className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition-shadow group"
+                  >
+                    {community.cover_image_url ? (
+                      <div className="h-48 overflow-hidden">
+                        <img
+                          src={community.cover_image_url}
+                          alt={community.name}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      </div>
+                    ) : (
+                      <div className="h-48 bg-gradient-to-br from-[#FF6B3D] to-[#FF855F] flex items-center justify-center">
+                        <Users className="w-16 h-16 text-white opacity-50" />
+                      </div>
+                    )}
+
+                    <div className="p-6">
+                      <div className="flex items-center gap-2 mb-3">
+                        {community.is_owner && (
+                          <span className="px-2 py-1 bg-purple-100 text-purple-700 text-xs font-medium rounded-full flex items-center gap-1">
+                            <User className="w-3 h-3" />
+                            Owner
+                          </span>
+                        )}
+                        {community.is_joined && !community.is_owner && (
+                          <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">
+                            Member
+                          </span>
+                        )}
+                      </div>
+
+                      <h3 className="text-xl font-bold text-slate-900 mb-2 line-clamp-1">
+                        {community.name}
+                      </h3>
+
+                      <p className="text-slate-600 text-sm mb-4 line-clamp-2">
+                        {community.description || 'No description'}
+                      </p>
+
+                      <div className="flex items-center gap-2 text-sm text-slate-600">
+                        <Users className="w-4 h-4" />
+                        <span>{community.member_count} members</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : currentView === 'communities' ? (
           // 检查权限，如果没有权限则显示提示
           !canAccessCommunity ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center animate-fade-in-up" style={{ animationDelay: '0.3s' }}>
@@ -512,7 +868,7 @@ function HomePageContent() {
                 <h2 className="font-brand text-2xl font-bold text-slate-900 flex items-center gap-2">
                   My Communities
                   <span className="bg-orange-50 text-[#FF6B3D] text-xs font-bold px-2 py-1 rounded-lg border border-orange-100">
-                    {myCommunities.length}
+                    {myUserCommunities.length}
                   </span>
                 </h2>
               </div>

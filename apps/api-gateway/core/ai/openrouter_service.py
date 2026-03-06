@@ -24,7 +24,7 @@ MODEL_CONFIG = {
         "max_tokens": 2000,
     },
     "image_generation": {
-        "model": "google/gemini-2.5-flash-image-preview",
+        "model": "meta-llama/llama-3.3-70b-instruct",
         "temperature": 0.8,
         "max_tokens": 1000,
     },
