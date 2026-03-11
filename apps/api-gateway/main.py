@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import iterate_in_threadpool
 from core.auth.dependencies import get_current_user
 from core.supabase_client import initialize_client
-from routes import home, auth, events, ai, users, communities
+from routes import home, auth, events, ai, users, communities, community_posts, community_members, community_invites
 import logging
 
 app = FastAPI(
@@ -143,6 +143,9 @@ app.include_router(events.router, prefix="/api/v1", tags=["活动"])
 app.include_router(ai.router, prefix="/api/v1", tags=["AI"])
 app.include_router(users.router, prefix="/api/v1", tags=["用户"])
 app.include_router(communities.router, prefix="/api/v1", tags=["社群"])
+app.include_router(community_posts.router, prefix="/api/v1", tags=["社群帖子"])
+app.include_router(community_members.router, prefix="/api/v1", tags=["社群成员"])
+app.include_router(community_invites.router, prefix="/api/v1", tags=["社群邀请"])
 
 @app.get("/")
 async def root():

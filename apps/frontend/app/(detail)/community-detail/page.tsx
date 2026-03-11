@@ -5,35 +5,30 @@ import { useSearchParams } from 'next/navigation';
 import { 
   Calendar, 
   MapPin, 
-  Clock,
   Instagram, 
   Globe, 
-  Trophy
+  Trophy,
+  Users,
+  MessageSquare,
+  Settings,
+  UserPlus,
+  Crown
 } from 'lucide-react';
 import Link from 'next/link';
 import LeaveModal from '@/components/detail/LeaveModal';
 import DetailNavbar from '@/components/detail/DetailNavbar';
-import CommunityWall from '@/components/detail/CommunityWall';
 import EventCard from '@/components/detail/EventCard';
-
-interface Reply {
-  id: number;
-  user: string;
-  avatar: string;
-  content: string;
-  time: string;
-  likes: number;
-}
-
-interface Comment {
-  id: number;
-  user: string;
-  avatar: string;
-  content: string;
-  time: string;
-  likes: number;
-  replies: Reply[];
-}
+import PostCard from '@/components/community/PostCard';
+import PostComposer from '@/components/community/PostComposer';
+import CommentSection from '@/components/community/CommentSection';
+import MemberList from '@/components/community/MemberList';
+import InviteModal from '@/components/community/InviteModal';
+import { 
+  getCommunityPosts, 
+  getCommunityMembers,
+  Member,
+  Post as PostType
+} from '@/lib/api/community';
 
 interface Event {
   id: number;
@@ -59,20 +54,27 @@ interface CommunityData {
   };
   bio: string;
   banner: string;
+  userRole?: 'owner' | 'admin' | 'member';
 }
+
+type TabType = 'posts' | 'members' | 'events' | 'settings';
 
 export default function CommunityDetailPage() {
   const searchParams = useSearchParams();
   const communityId = searchParams.get('id');
   
-  const [activeTab, setActiveTab] = useState<'all' | 'upcoming'>('all');
+  const [activeTab, setActiveTab] = useState<TabType>('posts');
   const [isJoined, setIsJoined] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
   const [communityData, setCommunityData] = useState<CommunityData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  const [posts, setPosts] = useState<PostType[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
-  // Mock events data (暂时保留，后续可以从 API 获取)
   const events: Event[] = [
     {
       id: 1,
@@ -86,12 +88,8 @@ export default function CommunityDetailPage() {
     }
   ];
 
-  // Mock comments data (暂时保留，后续可以从 API 获取)
-  const comments: Comment[] = [];
-
-  // 获取社群详情
   useEffect(() => {
-    const fetchCommunityDetail = async () => {
+    const fetchData = async () => {
       if (!communityId) {
         setError('社群 ID 不存在');
         setIsLoading(false);
@@ -107,19 +105,16 @@ export default function CommunityDetailPage() {
         
         if (token) {
           headers['Authorization'] = `Bearer ${token}`;
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          setCurrentUserId(payload.sub);
         }
 
         const response = await fetch(
           `${process.env.NEXT_PUBLIC_API_GATEWAY_URL}/api/v1/communities/${communityId}`,
-          {
-            method: 'GET',
-            headers,
-          }
+          { method: 'GET', headers }
         );
 
-        if (!response.ok) {
-          throw new Error('获取社群详情失败');
-        }
+        if (!response.ok) throw new Error('获取社群详情失败');
 
         const data = await response.json();
 
@@ -140,7 +135,8 @@ export default function CommunityDetailPage() {
               handle: `@${detail.owner_name?.toLowerCase().replace(/\s+/g, '_') || 'unknown'}`
             },
             bio: detail.community_description || '暂无描述',
-            banner: detail.community_cover_image_url || 'https://images.unsplash.com/photo-1551632811-561732d1e306?auto=format&fit=crop&q=80&w=1200'
+            banner: detail.community_cover_image_url || 'https://images.unsplash.com/photo-1551632811-561732d1e306?auto=format&fit=crop&q=80&w=1200',
+            userRole: detail.user_role
           });
 
           setIsJoined(detail.is_member || false);
@@ -155,13 +151,36 @@ export default function CommunityDetailPage() {
       }
     };
 
-    fetchCommunityDetail();
+    fetchData();
   }, [communityId]);
 
-  const handleJoinToggle = async () => {
-    if (isJoined) {
-      return;
+  useEffect(() => {
+    if (isJoined && communityId) {
+      loadPosts();
+      loadMembers();
     }
+  }, [isJoined, communityId]);
+
+  const loadPosts = async () => {
+    try {
+      const result = await getCommunityPosts(communityId!);
+      setPosts(result.posts || []);
+    } catch (error) {
+      console.error('加载帖子失败:', error);
+    }
+  };
+
+  const loadMembers = async () => {
+    try {
+      const result = await getCommunityMembers(communityId!);
+      setMembers(result.members || []);
+    } catch (error) {
+      console.error('加载成员失败:', error);
+    }
+  };
+
+  const handleJoinToggle = async () => {
+    if (isJoined) return;
 
     try {
       const token = localStorage.getItem('token');
@@ -174,9 +193,7 @@ export default function CommunityDetailPage() {
         `${process.env.NEXT_PUBLIC_API_GATEWAY_URL}/api/v1/communities/${communityId}/join`,
         {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
+          headers: { 'Authorization': `Bearer ${token}` },
         }
       );
 
@@ -186,18 +203,16 @@ export default function CommunityDetailPage() {
       }
 
       const data = await response.json();
-
       if (data.success) {
         setIsJoined(true);
-        // 更新成员数
         if (communityData) {
           setCommunityData({
             ...communityData,
             memberCount: communityData.memberCount + 1
           });
         }
-      } else {
-        throw new Error(data.message || '加入社群失败');
+        loadPosts();
+        loadMembers();
       }
     } catch (err) {
       console.error('加入社群失败:', err);
@@ -218,9 +233,7 @@ export default function CommunityDetailPage() {
         `${process.env.NEXT_PUBLIC_API_GATEWAY_URL}/api/v1/communities/${communityId}/leave`,
         {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
+          headers: { 'Authorization': `Bearer ${token}` },
         }
       );
 
@@ -230,19 +243,17 @@ export default function CommunityDetailPage() {
       }
 
       const data = await response.json();
-
       if (data.success) {
         setIsJoined(false);
         setShowLeaveModal(false);
-        // 更新成员数
         if (communityData) {
           setCommunityData({
             ...communityData,
             memberCount: Math.max(0, communityData.memberCount - 1)
           });
         }
-      } else {
-        throw new Error(data.message || '离开社群失败');
+        setPosts([]);
+        setMembers([]);
       }
     } catch (err) {
       console.error('离开社群失败:', err);
@@ -250,11 +261,9 @@ export default function CommunityDetailPage() {
     }
   };
 
-  const filteredEvents = activeTab === 'all' 
-    ? events 
-    : events.filter(event => event.status === 'Upcoming');
+  const isAdmin = communityData?.userRole === 'owner' || communityData?.userRole === 'admin';
+  const isOwner = communityData?.userRole === 'owner';
 
-  // 加载状态
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
@@ -266,7 +275,6 @@ export default function CommunityDetailPage() {
     );
   }
 
-  // 错误状态
   if (error || !communityData) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
@@ -287,19 +295,22 @@ export default function CommunityDetailPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans selection:bg-[#FF6B3D] selection:text-white pb-20 relative">
-      {/* Leave Modal */}
       <LeaveModal 
         isOpen={showLeaveModal}
         onClose={() => setShowLeaveModal(false)}
         onConfirm={confirmLeave}
       />
+      
+      <InviteModal
+        isOpen={showInviteModal}
+        onClose={() => setShowInviteModal(false)}
+        communityId={communityData.id}
+        communityName={communityData.name}
+      />
 
-      {/* Navigation */}
       <DetailNavbar />
 
-      {/* SECTION 1: Community Header & Info */}
       <div className="relative pt-20">
-        {/* Banner Image */}
         <div className="h-64 md:h-80 w-full overflow-hidden relative">
           <div className="absolute inset-0 bg-gradient-to-b from-transparent to-slate-900/30 z-10"></div>
           <img 
@@ -309,12 +320,9 @@ export default function CommunityDetailPage() {
           />
         </div>
 
-        {/* Info Card - Floating Effect */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-20 -mt-24">
           <div className="glass-panel rounded-3xl p-6 md:p-8 shadow-xl shadow-orange-500/5">
             <div className="flex flex-col md:flex-row md:items-start gap-6">
-              
-              {/* Left: Basic Info */}
               <div className="flex-1">
                 <div className="flex items-center gap-3 mb-2">
                   <span className="px-3 py-1 bg-orange-50 text-[#FF6B3D] text-xs font-bold font-brand rounded-full uppercase tracking-wider border border-orange-100">
@@ -331,7 +339,6 @@ export default function CommunityDetailPage() {
                   {communityData.bio}
                 </p>
 
-                {/* Creator & Socials */}
                 <div className="flex items-center flex-wrap gap-6">
                   <div className="flex items-center gap-3 pr-6 border-r border-slate-200">
                     <img src={communityData.creator.avatar} alt="Creator" className="w-10 h-10 rounded-full border-2 border-white shadow-sm" />
@@ -345,12 +352,6 @@ export default function CommunityDetailPage() {
                     <button className="w-9 h-9 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-[#FF6B3D] hover:text-white transition-all duration-300">
                       <Instagram size={18} />
                     </button>
-                    {/* Twitter/X Logo */}
-                    <button className="w-9 h-9 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-[#FF6B3D] hover:text-white transition-all duration-300">
-                      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-                        <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-                      </svg>
-                    </button>
                     <button className="w-9 h-9 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-[#FF6B3D] hover:text-white transition-all duration-300">
                       <Globe size={18} />
                     </button>
@@ -358,30 +359,28 @@ export default function CommunityDetailPage() {
                 </div>
               </div>
 
-              {/* Right: Actions & Stats */}
               <div className="flex flex-col gap-4 min-w-[200px]">
-                <button 
-                  onClick={handleJoinToggle}
-                  className={`w-full py-3 px-6 font-brand font-bold rounded-2xl shadow-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-2 ${
-                    isJoined 
-                      ? "bg-slate-800 text-white shadow-slate-800/20 cursor-default" 
-                      : "bg-[#FF6B3D] hover:bg-[#E55A2D] text-white shadow-orange-500/30"
-                  }`}
-                >
-                  {isJoined ? (
-                    <>
-                      <Trophy size={18} className="text-[#FF6B3D]" />
-                      Member • Day 1
-                    </>
-                  ) : (
-                    "Join Community"
-                  )}
-                </button>
+                {!isJoined ? (
+                  <button 
+                    onClick={handleJoinToggle}
+                    className="w-full py-3 px-6 font-brand font-bold rounded-2xl shadow-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-2 bg-[#FF6B3D] hover:bg-[#E55A2D] text-white shadow-orange-500/30"
+                  >
+                    Join Community
+                  </button>
+                ) : (
+                  <button 
+                    onClick={() => setShowInviteModal(true)}
+                    className="w-full py-3 px-6 font-brand font-bold rounded-2xl shadow-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-2 bg-[#FF6B3D] hover:bg-[#E55A2D] text-white shadow-orange-500/30"
+                  >
+                    <UserPlus size={18} />
+                    邀请成员
+                  </button>
+                )}
                 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-white/50 rounded-2xl p-3 text-center border border-white/60">
                     <div className="text-2xl font-brand font-bold text-slate-900">
-                      {isJoined ? communityData.memberCount + 1 : communityData.memberCount}
+                      {communityData.memberCount}
                     </div>
                     <div className="text-xs text-slate-500 font-medium uppercase">Members</div>
                   </div>
@@ -391,58 +390,98 @@ export default function CommunityDetailPage() {
                   </div>
                 </div>
               </div>
-
             </div>
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          
-          {/* SECTION 2: Event Feed (Main Column) */}
-          <div className="lg:col-span-8 space-y-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-brand font-bold text-slate-900 flex items-center gap-2">
-                <Calendar className="text-[#FF6B3D]" size={24} />
-                Events History
-              </h2>
-              <div className="flex bg-white rounded-xl p-1 shadow-sm border border-slate-100">
-                <button 
-                  onClick={() => setActiveTab('all')}
-                  className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${activeTab === 'all' ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
-                >
-                  All
-                </button>
-                <button 
-                  onClick={() => setActiveTab('upcoming')}
-                  className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${activeTab === 'upcoming' ? 'bg-orange-50 text-[#FF6B3D]' : 'text-slate-400 hover:text-slate-600'}`}
-                >
-                  Upcoming
-                </button>
-              </div>
-            </div>
-
-            {/* Event Cards Grid */}
-            <div className="grid gap-5">
-              {filteredEvents.map((event) => (
-                <EventCard key={event.id} event={event} />
-              ))}
-            </div>
-            <button className="w-full py-4 rounded-2xl border border-dashed border-slate-300 text-slate-400 hover:text-[#FF6B3D] hover:border-[#FF6B3D] font-bold text-sm transition-all flex items-center justify-center gap-2">
-              View All Past Events
-            </button>
+      {isJoined && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
+          <div className="flex gap-2 overflow-x-auto pb-2">
+            {[
+              { key: 'posts', label: '帖子', icon: MessageSquare },
+              { key: 'members', label: '成员', icon: Users },
+              { key: 'events', label: '活动', icon: Calendar },
+              ...(isOwner ? [{ key: 'settings', label: '设置', icon: Settings }] : [])
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key as TabType)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-colors ${
+                  activeTab === tab.key
+                    ? 'bg-[#FF6B3D] text-white'
+                    : 'bg-white text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                <tab.icon size={16} />
+                {tab.label}
+              </button>
+            ))}
           </div>
-
-          {/* SECTION 3: Content/Discussion Area (Sidebar) */}
-          <div className="lg:col-span-4">
-            <CommunityWall comments={comments} />
-          </div>
-
         </div>
+      )}
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
+        {activeTab === 'posts' && isJoined && (
+          <div className="space-y-4">
+            <PostComposer 
+              communityId={communityData.id}
+              onPostCreated={(newPost) => {
+                setPosts([newPost, ...posts]);
+              }}
+            />
+            
+            {posts.length > 0 ? (
+              posts.map((post) => (
+                <PostCard
+                  key={post.id}
+                  post={post}
+                  communityId={communityData.id}
+                  isAdmin={isAdmin}
+                  onPostUpdated={(updatedPost) => {
+                    if (updatedPost === null) {
+                      setPosts(posts.filter((p) => p.id !== post.id));
+                    } else {
+                      setPosts(posts.map((p) => (p.id === post.id ? updatedPost : p)));
+                    }
+                  }}
+                />
+              ))
+            ) : (
+              <div className="text-center py-12 bg-white rounded-2xl">
+                <MessageSquare size={48} className="mx-auto text-slate-300 mb-4" />
+                <p className="text-slate-500">还没有帖子，来发布第一篇吧！</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'members' && isJoined && (
+          <MemberList
+            communityId={communityData.id}
+            members={members}
+            currentUserId={currentUserId || undefined}
+            currentUserRole={communityData.userRole}
+            onMemberUpdated={loadMembers}
+          />
+        )}
+
+        {activeTab === 'events' && isJoined && (
+          <div className="grid gap-5">
+            {events.map((event) => (
+              <EventCard key={event.id} event={event} />
+            ))}
+          </div>
+        )}
+
+        {activeTab === 'settings' && isOwner && (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+            <h3 className="font-semibold text-slate-900 mb-4">社群设置</h3>
+            <p className="text-slate-500 text-sm">设置功能开发中...</p>
+          </div>
+        )}
       </div>
       
-      {/* Leave Community Footer Button */}
       {isJoined && (
         <div className="max-w-7xl mx-auto px-4 mt-12 mb-8 text-center">
           <button 
@@ -456,4 +495,3 @@ export default function CommunityDetailPage() {
     </div>
   );
 }
-

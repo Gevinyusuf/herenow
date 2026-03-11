@@ -128,7 +128,7 @@ export default function MyCommunitiesPage() {
             {filteredCommunities.map((community) => (
               <Link
                 key={community.id}
-                href={`/community/${community.slug || community.id}`}
+                href={`/community-detail?id=${community.id}`}
                 className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition-shadow group"
               >
                 {community.cover_image_url ? (
