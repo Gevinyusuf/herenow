@@ -312,20 +312,21 @@ Always respond in a warm, friendly tone. Make users feel like they're chatting w
         self,
         prompt: str,
         options: Optional[Dict[str, Any]] = None
-    ) -> str:
+    ) -> Dict[str, Any]:
         """
         生成图片（通过文本生成模型优化提示词，然后调用图片生成 API）
         
-        注意：OpenRouter 主要提供文本生成模型，图片生成需要额外的服务
-        这里先返回优化后的提示词，实际图片生成需要集成其他服务（如 Stability AI）
-        
         Args:
             prompt: 图片描述
-            options: 额外选项
+            options: 额外选项，可以包含：
+                - provider: 指定提供商 (stability_ai, openai, replicate)
+                - 其他提供商特定的选项
             
         Returns:
-            str: 图片 URL 或优化后的提示词
+            Dict[str, Any]: 包含图片 URL 和其他信息的字典
         """
+        from core.ai.image_generation_service import get_image_generation_service, ImageProvider
+        
         # 首先优化提示词
         optimized_prompt = await self.generate_text(
             prompt=prompt,
@@ -333,9 +334,26 @@ Always respond in a warm, friendly tone. Make users feel like they're chatting w
             options=options
         )
         
-        # TODO: 这里应该调用实际的图片生成 API（如 Stability AI、DALL-E 等）
-        # 目前返回优化后的提示词
-        return optimized_prompt
+        # 获取图片生成服务
+        image_service = get_image_generation_service()
+        
+        # 获取提供商配置
+        provider = None
+        if options and "provider" in options:
+            provider_str = options["provider"]
+            try:
+                provider = ImageProvider(provider_str)
+            except ValueError:
+                logger.warning(f"⚠️ 无效的提供商: {provider_str}，使用默认提供商")
+        
+        # 调用图片生成服务
+        result = await image_service.generate_image(
+            prompt=optimized_prompt,
+            provider=provider,
+            options=options
+        )
+        
+        return result
 
 
 # 创建全局服务实例

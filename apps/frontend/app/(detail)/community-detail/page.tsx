@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { 
   Calendar, 
   MapPin, 
@@ -45,26 +46,33 @@ interface Event {
   image: string;
 }
 
+interface CommunityData {
+  id: string;
+  name: string;
+  category: string;
+  memberCount: number;
+  foundedDate: string;
+  creator: {
+    name: string;
+    avatar: string;
+    handle: string;
+  };
+  bio: string;
+  banner: string;
+}
+
 export default function CommunityDetailPage() {
+  const searchParams = useSearchParams();
+  const communityId = searchParams.get('id');
+  
   const [activeTab, setActiveTab] = useState<'all' | 'upcoming'>('all');
   const [isJoined, setIsJoined] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [communityData, setCommunityData] = useState<CommunityData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Mock Data
-  const communityData = {
-    name: "SF Weekend Hikers",
-    category: "Outdoor & Adventure",
-    memberCount: 2453,
-    foundedDate: "Est. 2021",
-    creator: {
-      name: "Sarah Jenkins",
-      avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=150&h=150",
-      handle: "@sarah_hikes"
-    },
-    bio: "We are a group of outdoor enthusiasts exploring the hidden trails of San Francisco and the Bay Area. Every weekend is a new adventure. Beginners welcome! 🌲⛰️",
-    banner: "https://images.unsplash.com/photo-1551632811-561732d1e306?auto=format&fit=crop&q=80&w=1200",
-  };
-
+  // Mock events data (暂时保留，后续可以从 API 获取)
   const events: Event[] = [
     {
       id: 1,
@@ -75,74 +83,207 @@ export default function CommunityDetailPage() {
       attendees: 42,
       status: "Upcoming",
       image: "https://images.unsplash.com/photo-1478131143081-80f7f84ca84d?auto=format&fit=crop&q=80&w=600"
-    },
-    {
-      id: 2,
-      title: "Golden Gate Bridge Morning Walk",
-      date: "Oct 12, 2023",
-      time: "08:00 AM",
-      location: "Battery Spencer",
-      attendees: 156,
-      status: "Completed",
-      image: "https://images.unsplash.com/photo-1521464302861-ce943915d1c3?auto=format&fit=crop&q=80&w=600"
-    },
-    {
-      id: 3,
-      title: "Muir Woods Ancient Redwoods",
-      date: "Sep 28, 2023",
-      time: "09:00 AM",
-      location: "Muir Woods National Monument",
-      attendees: 89,
-      status: "Completed",
-      image: "https://images.unsplash.com/photo-1511497584788-876760111969?auto=format&fit=crop&q=80&w=600"
     }
   ];
 
-  const comments: Comment[] = [
-    {
-      id: 1,
-      user: "Alex Chen",
-      avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=100",
-      content: "The Lands End hike was absolutely stunning! Thanks for organizing.",
-      time: "2h ago",
-      likes: 12,
-      replies: [
-        {
-          id: 101,
-          user: "Sarah Jenkins",
-          avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=150",
-          content: "Glad you enjoyed it Alex! See you next time.",
-          time: "1h ago",
-          likes: 4
+  // Mock comments data (暂时保留，后续可以从 API 获取)
+  const comments: Comment[] = [];
+
+  // 获取社群详情
+  useEffect(() => {
+    const fetchCommunityDetail = async () => {
+      if (!communityId) {
+        setError('社群 ID 不存在');
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const token = localStorage.getItem('token');
+        
+        const headers: HeadersInit = {
+          'Content-Type': 'application/json',
+        };
+        
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
         }
-      ]
-    },
-    {
-      id: 2,
-      user: "Marcus Johnson",
-      avatar: "https://images.unsplash.com/photo-1599566150163-29194dcaad36?auto=format&fit=crop&q=80&w=100",
-      content: "Is the upcoming event dog friendly? 🐕",
-      time: "5h ago",
-      likes: 8,
-      replies: []
-    }
-  ];
 
-  const handleJoinToggle = () => {
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_API_GATEWAY_URL}/api/v1/communities/${communityId}`,
+          {
+            method: 'GET',
+            headers,
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error('获取社群详情失败');
+        }
+
+        const data = await response.json();
+
+        if (data.success && data.data) {
+          const detail = data.data;
+          
+          setCommunityData({
+            id: detail.community_id,
+            name: detail.community_name || '未命名社群',
+            category: detail.community_settings?.category || '社群',
+            memberCount: detail.community_members_count || 0,
+            foundedDate: detail.community_created_at 
+              ? `Est. ${new Date(detail.community_created_at).getFullYear()}`
+              : 'Est. 2024',
+            creator: {
+              name: detail.owner_name || '未知',
+              avatar: detail.owner_avatar_url || 'https://ui-avatars.com/api/?name=Unknown&background=FF6B3D&color=fff',
+              handle: `@${detail.owner_name?.toLowerCase().replace(/\s+/g, '_') || 'unknown'}`
+            },
+            bio: detail.community_description || '暂无描述',
+            banner: detail.community_cover_image_url || 'https://images.unsplash.com/photo-1551632811-561732d1e306?auto=format&fit=crop&q=80&w=1200'
+          });
+
+          setIsJoined(detail.is_member || false);
+        } else {
+          throw new Error(data.message || '获取社群详情失败');
+        }
+      } catch (err) {
+        console.error('获取社群详情失败:', err);
+        setError(err instanceof Error ? err.message : '获取社群详情失败');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchCommunityDetail();
+  }, [communityId]);
+
+  const handleJoinToggle = async () => {
     if (isJoined) {
       return;
     }
-    setIsJoined(true);
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        alert('请先登录');
+        return;
+      }
+
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_GATEWAY_URL}/api/v1/communities/${communityId}/join`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || '加入社群失败');
+      }
+
+      const data = await response.json();
+
+      if (data.success) {
+        setIsJoined(true);
+        // 更新成员数
+        if (communityData) {
+          setCommunityData({
+            ...communityData,
+            memberCount: communityData.memberCount + 1
+          });
+        }
+      } else {
+        throw new Error(data.message || '加入社群失败');
+      }
+    } catch (err) {
+      console.error('加入社群失败:', err);
+      alert(err instanceof Error ? err.message : '加入社群失败，请重试');
+    }
   };
 
-  const confirmLeave = () => {
-    setIsJoined(false);
-    setShowLeaveModal(false);
+  const confirmLeave = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        alert('请先登录');
+        setShowLeaveModal(false);
+        return;
+      }
+
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_GATEWAY_URL}/api/v1/communities/${communityId}/leave`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || '离开社群失败');
+      }
+
+      const data = await response.json();
+
+      if (data.success) {
+        setIsJoined(false);
+        setShowLeaveModal(false);
+        // 更新成员数
+        if (communityData) {
+          setCommunityData({
+            ...communityData,
+            memberCount: Math.max(0, communityData.memberCount - 1)
+          });
+        }
+      } else {
+        throw new Error(data.message || '离开社群失败');
+      }
+    } catch (err) {
+      console.error('离开社群失败:', err);
+      alert(err instanceof Error ? err.message : '离开社群失败，请重试');
+    }
   };
 
   const filteredEvents = activeTab === 'all' 
     ? events 
     : events.filter(event => event.status === 'Upcoming');
+
+  // 加载状态
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#FF6B3D] mx-auto mb-4"></div>
+          <p className="text-slate-600">加载中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 错误状态
+  if (error || !communityData) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-6xl mb-4">😕</div>
+          <h2 className="text-2xl font-bold text-slate-900 mb-2">出错了</h2>
+          <p className="text-slate-600 mb-4">{error || '社群不存在'}</p>
+          <Link 
+            href="/home" 
+            className="px-6 py-3 bg-[#FF6B3D] text-white rounded-full font-bold hover:bg-[#ff5a2d] transition-colors"
+          >
+            返回首页
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans selection:bg-[#FF6B3D] selection:text-white pb-20 relative">

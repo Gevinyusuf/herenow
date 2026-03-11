@@ -32,7 +32,7 @@ class AIGenerateRequest(BaseModel):
 class AIGenerateResponse(BaseModel):
     """AI 生成响应模型"""
     success: bool
-    data: str
+    data: Any  # 可以是字符串（文本生成）或字典（图片生成）
     message: Optional[str] = None
     quota: Optional[Dict[str, Any]] = None
 
