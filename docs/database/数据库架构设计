@@ -1,0 +1,377 @@
+# Event SaaS 数据库架构设计文档 (v1.0)
+
+## 1\. 设计概述
+
+  * **核心原则**：以用户 (User) 为中心，单一账户打通 B 端（主办方）与 C 端（参会者）身份。
+  * **商业模式**：Freemium。通过 `plans` 表定义权益，通过 `subscriptions` 表控制用户权限。
+  * **扩展性**：使用 JSONB 存储可变的配置项（如套餐权益、活动自定义字段），避免频繁迁移数据库结构。
+  * **规范**：
+      * 主键：建议使用 `BigInt` (自增) 或 `UUID` (安全性更高)。
+      * 时间：统一使用 `TIMESTAMPTZ` (带时区的时间戳)。
+
+## 2\. 核心 ER 关系图
+
+```mermaid
+erDiagram
+    Users ||--o{ Subscriptions : "holds"
+    Plans ||--o{ Subscriptions : "defined by"
+    Users ||--o{ Communities : "owns (Owner)"
+    Users ||--o{ CommunityMembers : "joins"
+    Communities ||--o{ CommunityMembers : "has members"
+    Communities ||--o{ Events : "contains (Strong Bind)"
+    Events ||--o{ Registrations : "receives"
+    Users ||--o{ Registrations : "submits"
+
+    %% 逻辑注释
+    %% 1. Users 表是唯一身份源
+    %% 2. Plans 表里的 JSONB 字段控制 Users 能创建多少 Communities/Events
+    %% 3. Registrations 成功创建后，触发 CommunityMembers 的写入
+```
+
+-----
+
+## 3\. 详细表结构 (SQL DDL - PostgreSQL)
+
+### 3.1 身份与权限模块
+
+#### `users` (用户核心表)
+
+存储基础信息。身份（Consumer/Organizer）不再物理隔离，而是通过行为区分。
+
+```sql
+CREATE TABLE users (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255), -- 若使用 Clerk/NextAuth，可存储外部 auth_id
+    full_name VARCHAR(100),
+    avatar_url TEXT,
+    
+    -- 引导字段：仅用于前端首次登录后的 Dashboard 路由判断
+    -- 'ORGANIZER' -> 去控制台; 'CONSUMER' -> 去发现页
+    primary_intent VARCHAR(20) DEFAULT 'HYBRID', 
+    
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 索引：高频查询
+CREATE INDEX idx_users_email ON users(email);
+```
+
+#### `plans` (套餐定义表 - 商业化核心)
+
+定义“免费版”和“付费版”的区别。
+
+```sql
+CREATE TABLE plans (
+    id INT PRIMARY KEY, -- e.g., 1=Free, 2=Pro, 3=Enterprise
+    name VARCHAR(50) NOT NULL,
+    price_monthly DECIMAL(10, 2) DEFAULT 0,
+    
+    -- 【关键设计】权益配置 (Feature Flags & Quotas)
+    -- 示例数据: 
+    -- { "max_communities": 1, "max_events_per_month": 3, "remove_branding": false, "can_export_data": false }
+    limits JSONB NOT NULL DEFAULT '{}', 
+    
+    is_active BOOLEAN DEFAULT TRUE
+);
+```
+
+#### `subscriptions` (订阅关系表)
+
+记录谁买了什么。
+
+```sql
+CREATE TABLE subscriptions (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    plan_id INT NOT NULL REFERENCES plans(id),
+    
+    -- 支付状态：'active', 'canceled', 'past_due', 'trialing'
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    
+    current_period_start TIMESTAMPTZ,
+    current_period_end TIMESTAMPTZ,
+    
+    -- 支付网关ID (Stripe/LemonSqueezy ID)
+    gateway_subscription_id VARCHAR(100),
+    
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    
+    -- 约束：一个用户同一时间只能有一个生效的主订阅
+    UNIQUE(user_id) 
+);
+```
+
+-----
+
+### 3.2 内容与社群模块
+
+#### `communities` (社群/组织者主页)
+
+活动必须挂载在社群下。
+
+```sql
+CREATE TABLE communities (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    owner_id BIGINT NOT NULL REFERENCES users(id), -- 创建者
+    
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    
+    -- 随机 Slug (e.g. 'club-x9s2')，作为 URL 标识
+    slug VARCHAR(30) UNIQUE NOT NULL,
+    
+    -- 社群配置：是否审核加入、Logo设置、联系方式
+    settings JSONB DEFAULT '{}',
+    
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_communities_owner ON communities(owner_id);
+```
+
+#### `events` (活动表)
+
+核心业务实体。
+
+```sql
+CREATE TABLE events (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    community_id BIGINT NOT NULL REFERENCES communities(id), -- 强关联
+    creator_id BIGINT NOT NULL REFERENCES users(id),
+    
+    title VARCHAR(255) NOT NULL,
+    -- 随机 Slug (e.g. 'evt-8821')
+    slug VARCHAR(50) UNIQUE NOT NULL,
+    
+    start_time TIMESTAMPTZ NOT NULL,
+    end_time TIMESTAMPTZ NOT NULL,
+    
+    -- 核心状态机：'DRAFT', 'PUBLISHED', 'CANCELED', 'ENDED'
+    status VARCHAR(20) DEFAULT 'DRAFT',
+    
+    -- 活动详情：地点(线上/线下)、富文本描述、封面图
+    -- 使用 JSONB 存储结构化地点信息 { "type": "offline", "address": "..." }
+    location_config JSONB, 
+    description TEXT,
+    
+    -- 票务简易配置 (MVP版本)
+    capacity INT DEFAULT 100,
+    is_public BOOLEAN DEFAULT TRUE,
+    
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 索引：查询某个社群下的活动
+CREATE INDEX idx_events_community ON events(community_id);
+-- 索引：查询公开且已发布的活动 (发现页 Feeds)
+CREATE INDEX idx_events_feed ON events(start_time) WHERE status = 'PUBLISHED' AND is_public = TRUE;
+```
+
+-----
+
+### 3.3 交互与数据模块
+
+#### `community_members` (社群成员表)
+
+连接 User 和 Community 的纽带。
+
+```sql
+CREATE TABLE community_members (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    community_id BIGINT NOT NULL REFERENCES communities(id),
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    
+    -- 角色：'OWNER', 'ADMIN', 'MEMBER'
+    role VARCHAR(20) DEFAULT 'MEMBER',
+    
+    -- 来源：'ORGANIC' (主动加入), 'EVENT_REGISTRATION' (报名自动加入)
+    source VARCHAR(50),
+    
+    joined_at TIMESTAMPTZ DEFAULT NOW(),
+    
+    -- 联合唯一索引：防止重复加入
+    UNIQUE(community_id, user_id)
+);
+```
+
+#### `registrations` (报名/订单表)
+
+C端用户的核心转化数据。
+
+```sql
+CREATE TABLE registrations (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    event_id BIGINT NOT NULL REFERENCES events(id),
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    
+    -- 状态：'PENDING' (待支付), 'CONFIRMED' (成功), 'CANCELED' (取消), 'CHECKED_IN' (已签到)
+    status VARCHAR(20) DEFAULT 'CONFIRMED',
+    
+    -- 签到码 / 核销码
+    check_in_code VARCHAR(20),
+    
+    ticket_price DECIMAL(10, 2) DEFAULT 0,
+    
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_registrations_user ON registrations(user_id);
+CREATE INDEX idx_registrations_event ON registrations(event_id);
+```
+
+-----
+
+## 4\. Prisma Schema (针对 Next.js 的最佳实践)
+
+如果你使用 Prisma ORM，请直接复制以下内容到 `schema.prisma`：
+
+```prisma
+// schema.prisma
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserIntent {
+  CONSUMER
+  ORGANIZER
+  HYBRID
+}
+
+enum SubStatus {
+  active
+  canceled
+  past_due
+  trialing
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  CANCELED
+  ENDED
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum RegStatus {
+  PENDING
+  CONFIRMED
+  CANCELED
+  CHECKED_IN
+}
+
+model User {
+  id            BigInt    @id @default(autoincrement())
+  email         String    @unique
+  full_name     String?
+  avatar_url    String?
+  primary_intent UserIntent @default(HYBRID)
+  created_at    DateTime  @default(now())
+
+  subscription  Subscription?
+  owned_communities Community[]  @relation("Owner")
+  memberships   CommunityMember[]
+  registrations Registration[]
+  created_events Event[]
+}
+
+model Plan {
+  id            Int      @id
+  name          String
+  price_monthly Decimal  @db.Decimal(10, 2)
+  limits        Json     // 核心权益配置
+  is_active     Boolean  @default(true)
+  
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id                  BigInt    @id @default(autoincrement())
+  user_id             BigInt    @unique
+  plan_id             Int
+  status              SubStatus @default(active)
+  current_period_end  DateTime?
+  
+  user                User      @relation(fields: [user_id], references: [id])
+  plan                Plan      @relation(fields: [plan_id], references: [id])
+}
+
+model Community {
+  id          BigInt   @id @default(autoincrement())
+  owner_id    BigInt
+  name        String
+  slug        String   @unique
+  settings    Json?    @default("{}")
+  created_at  DateTime @default(now())
+
+  owner       User     @relation("Owner", fields: [owner_id], references: [id])
+  events      Event[]
+  members     CommunityMember[]
+}
+
+model Event {
+  id              BigInt      @id @default(autoincrement())
+  community_id    BigInt
+  creator_id      BigInt
+  title           String
+  slug            String      @unique
+  start_time      DateTime
+  end_time        DateTime
+  status          EventStatus @default(DRAFT)
+  location_config Json?
+  description     String?     @db.Text
+  
+  community       Community     @relation(fields: [community_id], references: [id])
+  creator         User          @relation(fields: [creator_id], references: [id])
+  registrations   Registration[]
+}
+
+model CommunityMember {
+  id            BigInt   @id @default(autoincrement())
+  community_id  BigInt
+  user_id       BigInt
+  role          MemberRole @default(MEMBER)
+  source        String?
+  joined_at     DateTime   @default(now())
+
+  community     Community @relation(fields: [community_id], references: [id])
+  user          User      @relation(fields: [user_id], references: [id])
+
+  @@unique([community_id, user_id])
+}
+
+model Registration {
+  id            BigInt    @id @default(autoincrement())
+  event_id      BigInt
+  user_id       BigInt
+  status        RegStatus @default(CONFIRMED)
+  created_at    DateTime  @default(now())
+  
+  event         Event     @relation(fields: [event_id], references: [id])
+  user          User      @relation(fields: [user_id], references: [id])
+}
+```
+
+## 5\. 关键业务逻辑实施建议
+
+1.  **随机 Slug 生成**：不要在数据库层做，在应用层 (Node.js) 使用 `nanoid` 库生成，例如 `nanoid(10)`。如果插入时报错（极小概率冲突），Catch error 并重试一次即可。
+2.  **配额校验 (Guard Logic)**：
+      * 在 `createEvent` API 中，先 `await prisma.user.findUnique({ include: { subscription: { include: { plan: true } } } })`。
+      * 读取 `plan.limits.max_events`。
+      * 对比 `await prisma.event.count(...)`。
+3.  **报名即入群**：
+      * 使用 `prisma.$transaction` 包裹报名逻辑。
+      * 第一步：创建 `Registration`。
+      * 第二步：`upsert` 写入 `CommunityMember`（如果存在则忽略，不存在则创建）。
